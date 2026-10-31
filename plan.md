@@ -186,7 +186,7 @@ crustdata/
 
 | Risk | Mitigation |
 |---|---|
-| Region strings like "Greater Ahmedabad Area" | Offline gazetteer first, Nominatim with disk cache, country centroid fallback, unresolved shown as "unplaced" |
+| Region strings like "Greater Ahmedabad Area" (tested: raw strings fail on Nominatim; "Los Angeles Metropolitan Area" resolved to Lima, Peru) | Normalize (strip Greater/Area/Metropolitan, add country hint from `largest_headcount_country`) → offline gazetteer → Nominatim 1 req/s with disk cache and country sanity check → country centroid → "unplaced" list in the UI. Verified correct after normalization. |
 | Globe performance | Cap at 15 peers, ≤300 arcs, lazy-load three.js, static fallback map image if WebGL missing |
 | Semantic search noise | Four candidate sources + identify + LLM qualifier with visible reasons |
 | Rate limits on stage | Batching, disk cache, pre-warmed demo query, live for new ones |

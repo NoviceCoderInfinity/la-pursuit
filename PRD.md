@@ -148,6 +148,15 @@ interface DeckScene { lens:"operator"|"investor"|"founder";
 ```
 Every visual element with a number must expose its `ev` so the evidence drawer can open from it.
 
+### 8.6 Geocoding rule (Globe)
+Crustdata region strings are messy ("Greater Ahmedabad Area", "Los Angeles Metropolitan Area", bare "Surat"). Tested live: raw strings fail or mis-place on Nominatim (LA Metropolitan Area → Lima, Peru). The backend resolves them in this order, and every result is cached on disk forever:
+1. **Normalize**: strip `Greater `, ` Area`, ` Metropolitan Area`, ` Metro`; take the first comma segment as city; expand US state codes (`Dallas, TX` → `Dallas, TX, United States`).
+2. **Country hint**: append the peer's `headcount.largest_headcount_country` or `locations.country` when the string has no country (`Surat` → `Surat, India`).
+3. **Offline gazetteer** (`backend/app/data/cities.json`, ~1k major cities) checked first; zero network.
+4. **Nominatim** (`nominatim.openstreetmap.org`, 1 request/s, custom User-Agent) for misses. A result is rejected if its country disagrees with the hint.
+5. **Fallback**: country centroid; if still unresolved, the region goes to `GlobeScene.unplaced` and the UI lists it under the globe rather than dropping it silently.
+Verified: `Ahmedabad, India`, `Surat, India`, `Los Angeles, United States`, `Valsad, India`, `Pune, India`, `Dallas, TX, United States` all resolve correctly after normalization.
+
 ## 9. Design system (frontend)
 - Surfaces: graphite `#0B0C0E` / white `#FFFFFF`; text `#EDEDED` / `#111111`; muted `#8A8F98`.
 - Accent: electric blue `#3B82F6` (momentum, selection). Red `#EF4444` only for distress and contradictions. Green `#22C55E` only for verified.
