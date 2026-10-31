@@ -65,7 +65,8 @@ export function RunProvider({
             setPeers(r.peers);
             setScenes((s) => ({ ...r.scenes, ...s }));
             setCredits(r.credits_used);
-            if (!c.lens) setLensState(r.intent.lens);
+            const l = r.intent?.lens ?? (r as { lens?: Lens }).lens;
+            if (!c.lens && l) setLensState(l);
           })
           .catch(() => {});
       }

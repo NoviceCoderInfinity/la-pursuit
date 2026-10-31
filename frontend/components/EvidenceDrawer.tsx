@@ -76,13 +76,13 @@ export function EvidenceDrawer() {
                     <div className="mt-2 break-words text-[32px] font-semibold leading-[38px] tracking-tight tnum">
                       {typeof e.value === "object" ? JSON.stringify(e.value) : String(e.value)}
                     </div>
-                    <div className="mt-2 break-all font-mono text-[12px] text-fg-2">{e.path}</div>
+                    {e.path && <div className="mt-2 break-all font-mono text-[12px] text-fg-2">{e.path}</div>}
                   </div>
 
                   <dl className="grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-line bg-line text-[12px]">
                     {[
                       ["Endpoint", e.endpoint],
-                      ["Credits", String(e.credits)],
+                      ["Credits", String(e.credits ?? 0)],
                       ["Time", new Date(e.ts).toLocaleTimeString("en-GB")],
                     ].map(([k, v]) => (
                       <div key={k} className="bg-bg px-3 py-2.5">

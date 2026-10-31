@@ -76,7 +76,7 @@ export function ConstellationSceneView({ data }: { data: ConstellationScene }) {
   const label = (id: string) => nodes.find((n) => n.id === id)?.label ?? id;
 
   const emph = lens === "founder" ? "slots" : lens === "investor" ? "kings" : "pairs";
-  const title = emph === "slots" ? `${slots.length} investors with no bet here yet.` : emph === "kings" ? "Who backs this market." : "Who funds whom, and who may be bought.";
+  const title = emph === "slots" ? `${slots.length} ${slots.length === 1 ? "investor" : "investors"} with no bet here yet.` : emph === "kings" ? "Who backs this market." : "Who funds whom, and who may be bought.";
 
   return (
     <SceneFrame

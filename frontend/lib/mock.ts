@@ -321,7 +321,8 @@ export function mockDeck(lens: Lens, peers: Peer[]): DeckScene {
   };
 }
 
-const STAGES = ["intent", "resolve", "discover", "enrich", "signals", "engines", "scenes"] as const;
+// Mirrors backend/app/pipeline.py STAGES.
+const STAGES = ["intent", "resolve", "discover", "enrich", "signals", "engines", "scenes", "deck", "watch"] as const;
 
 export function mockTrace(rep: RunReport): { delay: number; ev: TraceEvent }[] {
   const out: { delay: number; ev: TraceEvent }[] = [];

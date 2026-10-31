@@ -22,7 +22,13 @@ export function ChordSceneView({ data }: { data: ChordScene }) {
   const moveAt = (s: number, t: number) => data.moves.find((m) => m.from === data.peers[s].peer_id && m.to === data.peers[t].peer_id);
   const totalMoves = data.moves.reduce((a, m) => a + m.count, 0);
 
-  const chords = useMemo(() => d3.chordDirected().padAngle(0.035).sortSubgroups(d3.descending)(data.matrix), [data.matrix]);
+  // Peers with no moves would pile up as zero-width slivers with colliding labels; leave them off the ring.
+  const ring = useMemo(() => data.peers.map((_, i) => i).filter((i) => data.matrix[i].some((v) => v > 0) || data.matrix.some((row) => row[i] > 0)), [data]);
+  const chords = useMemo(
+    () => d3.chordDirected().padAngle(0.035).sortSubgroups(d3.descending)(ring.map((i) => ring.map((j) => data.matrix[i][j]))),
+    [data.matrix, ring],
+  );
+  const at = (k: number) => ring[k]; // chord index → peer index
   // Sentiment (1–5 rating) on a single-hue blue ramp; missing → neutral.
   const sentColor = (v: number | null) => (v == null ? "var(--bg-3)" : d3.interpolateRgb("#9ec5f4", "#1c5cab")(Math.max(0, Math.min(1, (v - 3) / 1.6))));
   const maxNet = Math.max(1, ...data.peers.map((p) => Math.abs(p.net_flow)));
@@ -33,11 +39,11 @@ export function ChordSceneView({ data }: { data: ChordScene }) {
 
   const active = (c: d3.Chord) => {
     if (!hover) return true;
-    if (hover.kind === "group") return c.source.index === hover.i || c.target.index === hover.i;
-    return c.source.index === hover.s && c.target.index === hover.t;
+    if (hover.kind === "group") return at(c.source.index) === hover.i || at(c.target.index) === hover.i;
+    return at(c.source.index) === hover.s && at(c.target.index) === hover.t;
   };
   const ribbonColor = (c: d3.Chord) => {
-    if (hover?.kind === "group") return c.target.index === hover.i ? "#3b82f6" : "var(--s2)";
+    if (hover?.kind === "group") return at(c.target.index) === hover.i ? "#3b82f6" : "var(--s2)";
     if (hover?.kind === "ribbon") return "#3b82f6";
     return "var(--fg)";
   };
@@ -116,24 +122,24 @@ export function ChordSceneView({ data }: { data: ChordScene }) {
                   className="cursor-pointer transition-[fill-opacity] duration-200"
                   onMouseMove={(e) => {
                     const r = (e.currentTarget.ownerSVGElement!.parentElement as HTMLElement).getBoundingClientRect();
-                    setHover({ kind: "ribbon", s: c.source.index, t: c.target.index, x: e.clientX - r.left, y: e.clientY - r.top });
+                    setHover({ kind: "ribbon", s: at(c.source.index), t: at(c.target.index), x: e.clientX - r.left, y: e.clientY - r.top });
                   }}
                   onMouseLeave={() => setHover(null)}
-                  onClick={() => openEvidence(moveAt(c.source.index, c.target.index)?.ev)}
+                  onClick={() => openEvidence(moveAt(at(c.source.index), at(c.target.index))?.ev)}
                 />
               ))}
             </g>
             <g>
               {chords.groups.map((g) => {
-                const p = data.peers[g.index];
+                const p = data.peers[at(g.index)];
                 const mid = (g.startAngle + g.endAngle) / 2;
                 const flip = mid > Math.PI;
                 const outer = R + thick(p.net_flow);
-                const dim = hover?.kind === "group" && hover.i !== g.index;
+                const dim = hover?.kind === "group" && hover.i !== at(g.index);
                 return (
                   <g key={g.index}
-                    onMouseEnter={() => setHover({ kind: "group", i: g.index })} onMouseLeave={() => setHover(null)}
-                    onClick={() => openEvidence(data.moves.filter((m) => idxOf.get(m.to) === g.index || idxOf.get(m.from) === g.index).flatMap((m) => m.ev))}
+                    onMouseEnter={() => setHover({ kind: "group", i: at(g.index) })} onMouseLeave={() => setHover(null)}
+                    onClick={() => openEvidence(data.moves.filter((m) => idxOf.get(m.to) === at(g.index) || idxOf.get(m.from) === at(g.index)).flatMap((m) => m.ev))}
                     className="cursor-pointer" opacity={dim ? 0.35 : 1}>
                     <path d={arc({ ...g, innerRadius: R, outerRadius: outer }) ?? ""} fill={sentColor(p.sentiment)} stroke="var(--bg)" strokeWidth={2} />
                     <text
@@ -141,7 +147,7 @@ export function ChordSceneView({ data }: { data: ChordScene }) {
                       textAnchor={flip ? "end" : "start"} dy="0.35em"
                       className="fill-[var(--fg)] text-[12px] font-medium"
                     >
-                      {names[g.index]}
+                      {names[at(g.index)]}
                       <tspan className="fill-[var(--muted)] font-mono text-[11px]" dx={6}>{p.net_flow > 0 ? `+${p.net_flow}` : p.net_flow}</tspan>
                     </text>
                   </g>

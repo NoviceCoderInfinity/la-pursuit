@@ -18,7 +18,7 @@ const LAYERS: { key: Layer; label: string }[] = [
   { key: "expansion", label: "Expansion" },
 ];
 
-type Region = { label: string; lat: number; lng: number; count: number; peers: { peer_id: number; count: number }[] };
+type Region = { label: string; lat: number; lng: number; count: number; peers: { peer_id: number; count: number }[]; labels: string[] };
 type Arc = GlobeScene["arcs"][number] & { from: { lat: number; lng: number } };
 
 export function GlobeSceneView({ data }: { data: GlobeScene }) {
@@ -35,14 +35,33 @@ export function GlobeSceneView({ data }: { data: GlobeScene }) {
   const frame = data.timeline[idx];
   const regions = useMemo<Region[]>(() => {
     const m = new Map<string, Region>();
+    // Crustdata names one place several ways ("San Francisco Bay Area", "San Francisco, CA"), so
+    // bucket by ~100 km, name each bucket after its biggest contributor, then merge equal names.
+    const top = new Map<string, number>();
     for (const r of frame?.regions ?? []) {
-      const k = r.label;
-      const g = m.get(k) ?? { label: r.label, lat: r.lat, lng: r.lng, count: 0, peers: [] };
+      const k = `${Math.round(r.lat)},${Math.round(r.lng)}`;
+      const g = m.get(k) ?? { label: cleanLabel(r.label), lat: r.lat, lng: r.lng, count: 0, peers: [], labels: [] };
       g.count += r.count;
       g.peers.push({ peer_id: r.peer_id, count: r.count });
+      if (!g.labels.includes(r.label)) g.labels.push(r.label);
+      if (r.count > (top.get(k) ?? 0)) {
+        top.set(k, r.count);
+        g.label = cleanLabel(r.label);
+      }
       m.set(k, g);
     }
-    return [...m.values()].sort((a, b) => b.count - a.count);
+    const byName = new Map<string, Region>();
+    for (const g of [...m.values()].sort((a, b) => b.count - a.count)) {
+      const into = byName.get(g.label);
+      if (!into) {
+        byName.set(g.label, g);
+        continue;
+      }
+      into.count += g.count;
+      into.peers.push(...g.peers);
+      into.labels.push(...g.labels.filter((l) => !into.labels.includes(l)));
+    }
+    return [...byName.values()].sort((a, b) => b.count - a.count);
   }, [frame]);
   const present = useMemo(() => new Set(regions.flatMap((r) => r.peers.map((p) => `${p.peer_id}|${r.label}`))), [regions]);
   const maxCount = Math.max(1, ...regions.map((r) => r.count));
@@ -80,9 +99,9 @@ export function GlobeSceneView({ data }: { data: GlobeScene }) {
 
   const totalPeople = regions.reduce((a, r) => a + r.count, 0);
   // A region's evidence: arcs that reach it, plus HQ nodes sitting in it (HQ regions have no arc).
-  const regionEv = (label: string) => [
-    ...data.arcs.filter((a) => a.to.label === label).flatMap((a) => a.ev),
-    ...data.nodes.filter((n) => peer(n.peer_id)?.hq.city === label).flatMap((n) => n.ev),
+  const regionEv = (r: Region) => [
+    ...data.arcs.filter((a) => r.labels.includes(a.to.label)).flatMap((a) => a.ev),
+    ...data.nodes.filter((n) => r.labels.some((l) => cleanLabel(l) === (peer(n.peer_id)?.hq.city ?? ""))).flatMap((n) => n.ev),
   ];
   const hiringTotal = data.pulses.reduce((a, p) => a + p.jobs_90d, 0);
 
@@ -112,7 +131,7 @@ export function GlobeSceneView({ data }: { data: GlobeScene }) {
                 <li key={r.label}>
                   <div className="flex items-baseline justify-between text-[13px]">
                     <span className="truncate">{r.label}</span>
-                    <Num value={compact(r.count)} ev={regionEv(r.label)} className="font-mono text-[12px]" />
+                    <Num value={compact(r.count)} ev={regionEv(r)} className="font-mono text-[12px]" />
                   </div>
                   <div className="mt-1.5 h-[3px] rounded-full bg-bg-3">
                     <div className="h-full rounded-full bg-accent transition-[width] duration-300" style={{ width: `${(r.count / maxCount) * 100}%` }} />
@@ -125,12 +144,13 @@ export function GlobeSceneView({ data }: { data: GlobeScene }) {
             <div>
               <div className="eyebrow mb-2">Unplaced</div>
               <ul className="space-y-1 text-[12px] text-muted">
-                {data.unplaced.map((u) => (
+                {data.unplaced.slice(0, 4).map((u) => (
                   <li key={`${u.peer_id}${u.label}`} className="flex justify-between gap-2">
                     <span className="truncate">{u.label} · {peer(u.peer_id)?.name}</span>
                     <span className="font-mono tnum">{u.count}</span>
                   </li>
                 ))}
+                {data.unplaced.length > 4 && <li>+{data.unplaced.length - 4} more</li>}
               </ul>
             </div>
           )}
@@ -169,7 +189,7 @@ export function GlobeSceneView({ data }: { data: GlobeScene }) {
               const r = d as Region;
               return `<b>${r.label}</b> · ${r.count}<br/>${r.peers.map((p) => `${peer(p.peer_id)?.name ?? p.peer_id} ${p.count}`).join("<br/>")}`;
             }}
-            onPointClick={(d) => openEvidence(regionEv((d as Region).label))}
+            onPointClick={(d) => openEvidence(regionEv(d as Region))}
             arcsData={arcs}
             arcStartLat={(a) => (a as Arc).from.lat}
             arcStartLng={(a) => (a as Arc).from.lng}
@@ -228,6 +248,14 @@ function Stat({ label, value, ev }: { label: string; value: string; ev: EvId[] }
       <Num value={value} ev={ev} className="mt-1 font-dot text-[26px] font-black leading-[30px] !no-underline" />
     </div>
   );
+}
+
+function cleanLabel(l: string) {
+  return l
+    .replace(/^Greater\s+/i, "")
+    .replace(/\s+(Metropolitan\s+)?(Area|Region)\b.*$/i, "")
+    .replace(/,\s*[A-Z]{2}$/, "")
+    .trim();
 }
 
 function hexA(hex: string, a: number) {

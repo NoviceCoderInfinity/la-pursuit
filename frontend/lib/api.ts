@@ -1,18 +1,44 @@
-// Client for the PRD §8 API. Falls back to a local sample run when the backend is unreachable,
-// so every screen works offline. Mock run ids start with "mock_".
+// Client for the PRD §8 API. Falls back to a local run when the backend is unreachable, so every
+// screen works offline. Mock run ids start with "mock_". The fallback replays the recorded run in
+// fixtures/voice_ai.json (copied to public/ by `predev`/`prebuild`); the synthetic run in mock.ts is
+// only used if that file is missing.
 import { mockDeck, mockReport, mockTrace } from "./mock";
 import type { DeckScene, EvidenceEntry, Lens, RunReport, TraceEvent } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 const FORCE_MOCK = process.env.NEXT_PUBLIC_MOCK === "1";
+const FIXTURE_URL = "/fixtures/voice_ai.json";
+const REPLAY_SPEED = 3; // recorded run plays 3× faster
+const REPLAY_MAX_GAP_MS = 700;
 
 export const isMock = (runId: string) => runId.startsWith("mock_");
 
-const mockCache = new Map<string, RunReport>();
-function mockFor(query: string, lens?: Lens) {
+type Offline = { report: RunReport; recorded: boolean };
+let fixture: Promise<RunReport | null> | null = null;
+const loadFixture = () =>
+  (fixture ??= fetch(FIXTURE_URL)
+    .then((r) => (r.ok ? (r.json() as Promise<RunReport>) : null))
+    .catch(() => null));
+
+const synthetic = new Map<string, RunReport>();
+async function offline(query: string, lens?: Lens): Promise<Offline> {
+  const rec = await loadFixture();
+  if (rec) return { report: rec, recorded: true };
   const key = `${query}|${lens ?? ""}`;
-  if (!mockCache.has(key)) mockCache.set(key, mockReport(query, lens));
-  return mockCache.get(key)!;
+  if (!synthetic.has(key)) synthetic.set(key, mockReport(query, lens));
+  return { report: synthetic.get(key)!, recorded: false };
+}
+
+/** Recorded trace → replay schedule, keeping the real rhythm but compressed. */
+function replay(trace: TraceEvent[]) {
+  let at = 0;
+  return trace.map((ev, i) => {
+    if (i > 0) {
+      const gap = Date.parse(ev.ts) - Date.parse(trace[i - 1].ts);
+      at += Math.min(REPLAY_MAX_GAP_MS, Math.max(0, gap) / REPLAY_SPEED);
+    }
+    return { delay: at, ev };
+  });
 }
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
@@ -47,8 +73,17 @@ export function subscribe(
   onEvent: (e: TraceEvent) => void,
 ): () => void {
   if (isMock(runId)) {
-    const timers = mockTrace(mockFor(ctx.query, ctx.lens)).map(({ delay, ev }) => setTimeout(() => onEvent(ev), delay));
-    return () => timers.forEach(clearTimeout);
+    let timers: ReturnType<typeof setTimeout>[] = [];
+    let cancelled = false;
+    offline(ctx.query, ctx.lens).then(({ report, recorded }) => {
+      if (cancelled) return;
+      const plan = recorded ? replay(report.trace) : mockTrace(report);
+      timers = plan.map(({ delay, ev }) => setTimeout(() => onEvent(ev), delay));
+    });
+    return () => {
+      cancelled = true;
+      timers.forEach(clearTimeout);
+    };
   }
   const es = new EventSource(`${BASE}/api/run/${runId}/events`);
   es.onmessage = (m) => {
@@ -65,17 +100,21 @@ export function subscribe(
 }
 
 export async function getReport(runId: string, ctx: { query: string; lens?: Lens }): Promise<RunReport> {
-  if (isMock(runId)) return mockFor(ctx.query, ctx.lens);
+  if (isMock(runId)) return (await offline(ctx.query, ctx.lens)).report;
   return json<RunReport>(`/api/run/${runId}`);
 }
 
 export async function getEvidence(runId: string, evId: string, ctx: { query: string; lens?: Lens }): Promise<EvidenceEntry | null> {
-  if (isMock(runId)) return mockFor(ctx.query, ctx.lens).ledger.find((e) => e.id === evId) ?? null;
+  if (isMock(runId)) return (await offline(ctx.query, ctx.lens)).report.ledger.find((e) => e.id === evId) ?? null;
   return json<EvidenceEntry>(`/api/run/${runId}/evidence/${evId}`);
 }
 
 export async function setLens(runId: string, lens: Lens, ctx: { query: string; lens?: Lens }): Promise<DeckScene> {
-  if (isMock(runId)) return mockDeck(lens, mockFor(ctx.query, ctx.lens).peers);
+  if (isMock(runId)) {
+    const { report, recorded } = await offline(ctx.query, ctx.lens);
+    // A recording holds one lens's deck; re-ranking needs the backend.
+    return recorded ? { ...(report.scenes.deck as DeckScene), lens } : mockDeck(lens, report.peers);
+  }
   return json<DeckScene>(`/api/run/${runId}/lens`, { method: "POST", body: JSON.stringify({ lens }) });
 }
 
