@@ -31,16 +31,16 @@ export interface EvidenceEntry {
 
 export type TraceType =
   | "tool_call" | "tool_result" | "decision" | "stage_start" | "stage_done"
-  | "scene_ready" | "error" | "done";
+  | "scene_ready" | "error" | "done" | "note";
 
 export interface TraceEvent {
   ts: string;
   stage: string;
   type: TraceType;
   label?: string;
-  detail?: { params?: object; count?: number; ms?: number; credits?: number };
+  detail?: { params?: object; count?: number | null; ms?: number | null; credits?: number; endpoint?: string; cached?: boolean; [k: string]: unknown };
   decision?: {
-    kind: "accept" | "reject" | "widen" | "narrow" | "retry" | "degrade" | "disambiguate";
+    kind: "accept" | "reject" | "widen" | "narrow" | "retry" | "degrade" | "disambiguate" | "dispute" | "fallback";
     subject: string;
     reason: string;
   };
@@ -68,13 +68,43 @@ export interface GlobeScene {
 }
 
 export interface FieldScene {
-  axes: { x: "headcount_growth_yoy"; y: "organic_pull" };
+  // x/y are trailing growth rates so the 12 frames animate; `pull` (Organic Pull 0-100) rides on each point.
+  axes: { x: "headcount_growth_yoy" | "headcount_growth_6m_pct"; y: "organic_pull" | "traffic_growth_3m_pct"; size?: string; color?: string };
   frames: {
     date: string;
-    points: { peer_id: number; x: number; y: number; size: number; momentum: number; distress: number }[];
+    points: { peer_id: number; x: number | null; y: number | null; size: number; momentum: number | null; distress: number | null; pull?: number | null; headcount?: number | null }[];
   }[];
   weights: { headcount: number; hiring: number; traffic: number; followers: number; funding: number };
   ev: Record<number, EvId[]>;
+  /** Per-peer engine detail for the aside (owned by F2). */
+  table?: FieldRow[];
+}
+
+export interface FieldRow {
+  peer_id: number;
+  momentum: number | null;
+  momentum_parts: Record<string, number | null>;
+  momentum_weights: Record<string, number>;
+  pull: number | null;
+  pull_parts: Record<string, number | null>;
+  distress: number | null;
+  distress_signals: { w: number; text: string }[];
+  hc_growth_6m: number | null;
+  hc_growth_yoy: number | null;
+  traffic_qoq: number | null;
+  followers_qoq: number | null;
+  visitors: number | null;
+  paid_share: number | null;
+  ads_budget: number | null;
+  kw_gained: number | null;
+  kw_lost: number | null;
+  openings: number | null;
+  jobs_90d: number | null;
+  last_round: string | null;
+  last_round_date: string | null;
+  months_since_round: number | null;
+  outlook: number | null;
+  recommend: number | null;
 }
 
 export const FUNCTIONS = ["Engineering", "Sales", "Customer Success", "Marketing", "Operations", "Other"] as const;
@@ -138,8 +168,12 @@ export interface TruthScene {
     ev: EvId[];
     note: string;
   }[];
-  rejected_candidates: { name: string; reason: string }[];
+  rejected_candidates: { name: string; domain?: string | null; reason: string }[];
   rejected_news: { peer_id: number; title: string; reason: string }[];
+  /** Extras owned by F6. */
+  calls?: number;
+  endpoints?: string[];
+  news?: Record<number, { title: string; url: string | null; date: string | null; publisher: string | null }[]>;
 }
 
 export interface DeckScene {
@@ -152,8 +186,13 @@ export interface DeckScene {
     scene: "globe" | "field" | "streams" | "chord" | "constellation";
     links: { label: string; url: string }[];
   }[];
-  watches: { id: string; kind: "entity" | "discovery"; track: string; status: string; preview_sample?: object }[];
+  watches: { id: string; kind: "entity" | "discovery"; track: string; status: string; preview_sample?: object | null; entities?: number; resolved?: number; created_at?: string; ev?: EvId[] }[];
   alerts: { ts: string; peer_id: number; engine: string; headline: string; ev: EvId[] }[];
+  /** Extras owned by F7. */
+  target_id?: number | null;
+  diligence_questions?: string[];
+  market_stage?: string;
+  crowdedness?: number;
 }
 
 export interface Scenes {

@@ -86,6 +86,15 @@ Frontend: Next.js 15 (App Router), TypeScript, Tailwind, Framer Motion, react-gl
 ```
 `scene_ready` carries the full scene payload so the UI can render as scenes complete, globe first.
 
+Additions agreed 2026-10-31 (implemented in `backend/app`):
+- `stage_done` for `enrich` **and** `signals` carries `data: {peers: Peer[]}` (signals re-sends peers once HQ coordinates are geocoded).
+- The `intent` stage emits a `decision` whose `reason` starts with `Lens: <lens>` so the UI can pick up the auto-detected lens.
+- Extra event type `note` (free-text progress) and extra decision kinds `dispute` (Truth Lens conflict) and `fallback`. Unknown kinds render with no glyph.
+- `tool_result.detail` also carries `endpoint` and `cached`; the Truth Lens renders the live ledger from these.
+- Later stages are named `deck` and `watch` after `scenes`; the stage bar may ignore them.
+- Watches always carry an `id` (`"preview"` until created) plus `entities`, `resolved`, `created_at`, `ev`.
+- Backend listens on **:8001** on Aman's machine (`API_ORIGIN=http://127.0.0.1:8001 npm run dev`).
+
 ### 8.3 RunReport
 ```json
 {"run_id":"r_abc","query":"AI voice agent platforms","intent":{"kind":"market|company|idea","keywords":[],"geo":null,"lens":"founder"},
@@ -115,10 +124,12 @@ interface GlobeScene {
   unplaced:{peer_id:number; label:string; count:number}[] }
 
 interface FieldScene {
-  axes:{x:"headcount_growth_yoy"; y:"organic_pull"};
-  frames:{date:string; points:{peer_id:number; x:number; y:number; size:number; momentum:number; distress:number}[]}[];
+  // x/y are trailing growth rates so the 12 monthly frames animate; Organic Pull rides on each point as `pull`.
+  axes:{x:"headcount_growth_6m_pct"; y:"traffic_growth_3m_pct"; size:"raised_usd"; color:"momentum"};
+  frames:{date:string; points:{peer_id:number; x:number|null; y:number|null; size:number; momentum:number|null; distress:number|null; pull:number|null; headcount:number|null}[]}[];
   weights:{headcount:number; hiring:number; traffic:number; followers:number; funding:number};
-  ev:Record<number,EvId[]> }
+  ev:Record<number,EvId[]>;
+  table:FieldRow[] }   // per-peer engine detail (momentum parts + weights, pull parts, distress signals, raw metrics) for the aside
 
 interface StreamsScene { peers:{peer_id:number;
   series:{date:string; Engineering:number; Sales:number; "Customer Success":number; Marketing:number; Operations:number; Other:number}[];

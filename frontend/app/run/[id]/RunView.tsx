@@ -12,13 +12,19 @@ import { ChordSceneView } from "@/scenes/Chord";
 import { ConstellationSceneView } from "@/scenes/Constellation";
 import { GlobeSceneView } from "@/scenes/Globe";
 import { StreamsSceneView } from "@/scenes/Streams";
+import { FieldSceneView } from "@/scenes/Field";
+import { TruthSceneView } from "@/scenes/Truth";
+import { DeckSceneView } from "@/scenes/Deck";
 
 // Scenes not yet built (F2 Field, F6 Truth, F7 Deck) fall back to a placeholder frame.
 const VIEWS: Partial<{ [K in SceneKey]: React.ComponentType<{ data: Scenes[K] }> }> = {
   globe: GlobeSceneView,
+  field: FieldSceneView,
   streams: StreamsSceneView,
   chord: ChordSceneView,
   constellation: ConstellationSceneView,
+  truth: TruthSceneView,
+  deck: DeckSceneView,
 };
 
 export default function RunView({ runId, query, lens }: { runId: string; query: string; lens?: Lens }) {
