@@ -175,7 +175,11 @@ async def register_watches(run: "Run") -> list[dict[str, Any]]:
     except CrustError as e:
         t.decide("degrade", "entity watch", e.message)
     # discovery watch: new entrants matching the market definition
-    kw = [k for k in (run.intent.keywords if run.intent else []) if len(k) > 3][:2]
+    # keywords from the market definition, never the raw query (a company query would yield its own name)
+    from app.textutil import tokens
+    seed_name = {t for t in tokens(run.seed.name)} if run.seed else set()
+    kw = [k for k in sorted(tokens(run.intent.market_description if run.intent else ""), key=len, reverse=True)
+          if len(k) > 3 and k not in seed_name][:2]
     if kw:
         dbody = {"filters": {"op": "and", "conditions": [{"field": "basic_info.description", "type": "(.)", "value": " ".join(kw)},
                                                           {"field": "headcount.total", "type": "=>", "value": 10}]},
