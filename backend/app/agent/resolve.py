@@ -77,13 +77,15 @@ def score_matches(matches: list[dict[str, Any]], cands: list[Candidate], seed_na
         # 4. description overlap with the request, ignoring the company's own name tokens
         ctx = overlap(" ".join(t for t in tokens(context) if t not in seed_toks), c.description)
         size_rank = _range_rank(b.get("employee_count_range"))
-        score = conf + name_score + tld_hint + tech + 0.9 * ctx + 0.03 * size_rank
+        services = -0.5 if SERVICES_HINT.search(c.description or "") and not SERVICES_HINT.search(context) else 0.0
+        score = conf + name_score + tld_hint + tech + 0.9 * ctx + 0.08 * size_rank + services
         scored.append((score, c, conf))
     scored.sort(key=lambda t: t[0], reverse=True)
     return scored
 
 
 TLD_WORDS = {"ai", "io", "app", "dev", "co", "com", "xyz", "tech", "cloud"}
+SERVICES_HINT = re.compile(r"\b(agency|agencies|consultanc(y|ies)|consulting|freelanc|outsourc|staffing|recruit(ing|ment)|it services|custom software|digital marketing|web design)\b", re.I)
 TECH = re.compile(r"\b(ai|a\.i\.|software|saas|platform|startup|api|agent|agents|app|cloud|data|ml|tech|invest|voice|llm)\b", re.I)
 
 
