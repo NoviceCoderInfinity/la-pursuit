@@ -46,8 +46,9 @@ export function ConstellationSceneView({ data }: { data: ConstellationScene }) {
       .force("collide", d3.forceCollide<CNode>((n) => n.r + 14))
       .force("x", d3.forceX(W / 2).strength(0.04))
       .force("y", d3.forceY(H / 2).strength(0.06))
-      .force("radial", d3.forceRadial<CNode>((n) => (n.kingmaker ? 0 : n.open_slot ? outer : outer * 0.55), W / 2, H / 2)
-        .strength((n) => (n.kingmaker ? 0.12 : n.open_slot ? 0.5 : 0.02)))
+      // Kingmakers sit in the middle; single-bet investors and open slots ride the outer ring.
+      .force("radial", d3.forceRadial<CNode>((n) => (n.kingmaker ? 0 : n.open_slot ? outer : n.type === "investor" ? outer * 0.85 : outer * 0.5), W / 2, H / 2)
+        .strength((n) => (n.kingmaker ? 0.12 : n.open_slot ? 0.5 : n.type === "investor" ? 0.08 : 0.02)))
       .stop();
     for (let i = 0; i < 320; i++) sim.tick();
     nodes.forEach((n) => {
@@ -76,7 +77,7 @@ export function ConstellationSceneView({ data }: { data: ConstellationScene }) {
   const label = (id: string) => nodes.find((n) => n.id === id)?.label ?? id;
 
   const emph = lens === "founder" ? "slots" : lens === "investor" ? "kings" : "pairs";
-  const title = emph === "slots" ? `${slots.length} investors with no bet here yet.` : emph === "kings" ? "Who backs this market." : "Who funds whom, and who may be bought.";
+  const title = emph === "slots" ? `${slots.length} ${slots.length === 1 ? "investor" : "investors"} with no bet here yet.` : emph === "kings" ? "Who backs this market." : "Who funds whom, and who may be bought.";
 
   return (
     <SceneFrame
@@ -125,7 +126,9 @@ export function ConstellationSceneView({ data }: { data: ConstellationScene }) {
               const recentEdge = l.edge?.recent;
               return (
                 <line key={k} x1={l.source.x} y1={l.source.y} x2={l.target.x} y2={l.target.y}
-                  stroke={recentEdge ? "#3b82f6" : "var(--line-2)"} strokeWidth={recentEdge ? 1.5 : 1}
+                  stroke={recentEdge ? "#3b82f6" : "var(--line-2)"}
+                  strokeWidth={(recentEdge ? 1.5 : 1) * (l.edge?.attributed === false ? 0.6 : 1)}
+                  strokeDasharray={l.edge?.attributed === false ? "3 3" : undefined}
                   filter={recentEdge && on ? "url(#glow)" : undefined}
                   opacity={on ? (recentEdge ? 0.9 : 1) : 0.15}
                   className="cursor-pointer transition-opacity duration-200"

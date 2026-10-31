@@ -60,12 +60,13 @@ export function RunProvider({
       if (ev.type === "scene_ready" && ev.scene) setScenes((s) => ({ ...s, [ev.scene!]: ev.data }));
       if (ev.type === "done") {
         setStatus("done");
-        getReport(runId, c)
+        getReport(runId)
           .then((r) => {
             setPeers(r.peers);
             setScenes((s) => ({ ...r.scenes, ...s }));
             setCredits(r.credits_used);
-            if (!c.lens) setLensState(r.intent.lens);
+            const l = r.intent?.lens ?? (r as { lens?: Lens }).lens;
+            if (!c.lens && l) setLensState(l);
           })
           .catch(() => {});
       }
@@ -78,7 +79,7 @@ export function RunProvider({
   const setLens = useCallback(
     (l: Lens) => {
       setLensState(l);
-      postLens(runId, l, ctx.current)
+      postLens(runId, l)
         .then((deck) => setScenes((s) => ({ ...s, deck })))
         .catch(() => {});
     },

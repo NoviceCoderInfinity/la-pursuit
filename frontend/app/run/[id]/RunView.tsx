@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { EvidenceDrawer } from "@/components/EvidenceDrawer";
 import { StageBar, Trace } from "@/components/Trace";
@@ -151,8 +152,23 @@ function NothingFound() {
 }
 
 function Waiting() {
-  const { trace } = useRun();
+  const { trace, status } = useRun();
   const last = [...trace].reverse().find((e) => e.type === "stage_start");
+  if (status === "done") {
+    // Finished without a single scene: say why, never show an empty report.
+    const err = [...trace].reverse().find((e) => e.type === "error");
+    const hint = (err?.detail as { suggestion?: string } | undefined)?.suggestion;
+    return (
+      <div className="dots grid min-h-[60vh] place-items-center px-6">
+        <div className="max-w-[520px] text-center">
+          <div className="font-dot text-[56px] font-black leading-none text-red">×</div>
+          <div className="mt-6 text-[28px] font-semibold leading-[34px] tracking-tight">{err?.label ?? "Nothing to show for this request."}</div>
+          {hint && <p className="mt-3 text-muted">{hint}</p>}
+          <Link href="/" className="mt-8 inline-flex rounded-full bg-fg px-5 py-2.5 text-[13px] font-medium text-bg">Try another</Link>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="dots grid min-h-[60vh] place-items-center px-6">
       <div className="text-center">

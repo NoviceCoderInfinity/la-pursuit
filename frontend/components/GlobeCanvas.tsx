@@ -55,7 +55,7 @@ export default function GlobeCanvas({
     const c = g.controls();
     c.autoRotate = autoRotate;
     c.autoRotateSpeed = rotateSpeed;
-    c.enableZoom = interactive;
+    c.enableZoom = false; // wheel scrolls the page, not the globe
     c.enableRotate = interactive;
   }, [autoRotate, rotateSpeed, interactive]);
 
@@ -82,7 +82,7 @@ export default function GlobeCanvas({
         const c = g.controls();
         c.autoRotate = autoRotate;
         c.autoRotateSpeed = rotateSpeed;
-        c.enableZoom = interactive;
+        c.enableZoom = false; // wheel scrolls the page, not the globe
         c.enableRotate = interactive;
         if (pov) g.pointOfView(pov, 0);
       }}

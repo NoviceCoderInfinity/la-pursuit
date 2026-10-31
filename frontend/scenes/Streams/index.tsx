@@ -92,6 +92,8 @@ function Card({ p, name, hover, setHover }: { p: PeerStream; name: string; hover
   const total = at ? FUNCTIONS.reduce((a, f) => a + at[f], 0) : 0;
   const sales = at ? at.Sales / (total || 1) : 0;
   const barW = width / Math.max(1, p.ad_budget_series.length);
+  // Crustdata returns a single current monthly budget repeated over months; don't draw it as a trend.
+  const flatAds = new Set(p.ad_budget_series.map((d) => d.usd)).size <= 1;
 
   return (
     <div className="bg-bg p-5">
@@ -128,7 +130,9 @@ function Card({ p, name, hover, setHover }: { p: PeerStream; name: string; hover
             )}
             {hover != null && <line x1={x(hover)} x2={x(hover)} y1={0} y2={H + AD + 6} stroke="var(--fg)" strokeWidth={1} />}
             <g transform={`translate(0, ${H + 6})`}>
-              {p.ad_budget_series.map((d, i) => (
+              {flatAds ? (
+                <rect x={0} width={width} y={AD - 3} height={3} rx={1.5} fill="var(--muted)" opacity={p.ad_budget_series[0]?.usd ? 0.45 : 0.15} />
+              ) : p.ad_budget_series.map((d, i) => (
                 <rect key={d.date} x={i * barW + 1} width={Math.max(1, barW - 2)} y={AD - adY(d.usd)} height={adY(d.usd)} rx={1}
                   fill={hover === i ? "var(--fg)" : "var(--muted)"} opacity={hover === i ? 1 : 0.45} />
               ))}
@@ -138,8 +142,8 @@ function Card({ p, name, hover, setHover }: { p: PeerStream; name: string; hover
       </div>
 
       <div className="mt-3 flex items-center justify-between text-[11px] text-muted">
-        <span className="eyebrow !text-[10px]">Ad spend</span>
-        <Num value={usd(hover != null ? p.ad_budget_series[hover]?.usd : p.ad_budget_series.at(-1)?.usd)} ev={p.ev} className="font-mono" />
+        <span className="eyebrow !text-[10px]">{flatAds ? "Current ad budget / mo" : "Ad budget / mo"}</span>
+        <Num value={usd(hover != null && !flatAds ? p.ad_budget_series[hover]?.usd : p.ad_budget_series.at(-1)?.usd)} ev={p.ev} className="font-mono" />
       </div>
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 border-t border-line pt-3 text-[11px] text-muted">
         <span className="eyebrow !text-[10px]">Open roles</span>

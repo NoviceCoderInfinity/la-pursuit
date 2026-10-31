@@ -8,7 +8,7 @@ import type { EvidenceEntry } from "@/lib/types";
 import { cx } from "@/lib/format";
 
 export function EvidenceDrawer() {
-  const { evidence, closeEvidence, runId, query } = useRun();
+  const { evidence, closeEvidence, runId } = useRun();
   const [active, setActive] = useState(0);
   const [entries, setEntries] = useState<Record<string, EvidenceEntry | null>>({});
   const [copied, setCopied] = useState(false);
@@ -18,7 +18,7 @@ export function EvidenceDrawer() {
     if (!evidence) return;
     evidence.forEach((id) => {
       if (id in entries) return;
-      getEvidence(runId, id, { query })
+      getEvidence(runId, id)
         .then((e) => setEntries((m) => ({ ...m, [id]: e })))
         .catch(() => setEntries((m) => ({ ...m, [id]: null })));
     });
@@ -76,13 +76,13 @@ export function EvidenceDrawer() {
                     <div className="mt-2 break-words text-[32px] font-semibold leading-[38px] tracking-tight tnum">
                       {typeof e.value === "object" ? JSON.stringify(e.value) : String(e.value)}
                     </div>
-                    <div className="mt-2 break-all font-mono text-[12px] text-fg-2">{e.path}</div>
+                    {e.path && <div className="mt-2 break-all font-mono text-[12px] text-fg-2">{e.path}</div>}
                   </div>
 
                   <dl className="grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-line bg-line text-[12px]">
                     {[
                       ["Endpoint", e.endpoint],
-                      ["Credits", String(e.credits)],
+                      ["Credits", String(e.credits ?? 0)],
                       ["Time", new Date(e.ts).toLocaleTimeString("en-GB")],
                     ].map(([k, v]) => (
                       <div key={k} className="bg-bg px-3 py-2.5">
