@@ -209,7 +209,7 @@ export function GlobeSceneView({ data }: { data: GlobeScene }) {
             arcLabel={(a) => {
               const x = a as Arc;
               const from = peer(x.peer_id)?.name ?? "";
-              return x.kind === "talent" ? `<b>${from} → ${x.to.label}</b><br/>${x.people} people` : `<b>${from}</b> · ${x.to.label}<br/>${x.people} people${x.kind === "expansion" ? " · new" : ""}`;
+              return x.kind === "talent" ? `<b>${from} → ${x.to.label}</b><br/>${x.people} people` : `<b>${from}</b> · ${x.to.label}<br/>${x.people} people${x.kind === "expansion" ? ` · new${x.since ? ` since ${monthLabel(x.since)}` : ""}` : ""}`;
             }}
             onArcClick={(a) => openEvidence((a as Arc).ev)}
             ringsData={on.hiring ? data.pulses : []}

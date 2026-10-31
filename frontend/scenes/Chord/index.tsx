@@ -101,7 +101,7 @@ export function ChordSceneView({ data }: { data: ChordScene }) {
               {data.senior_joins.slice(0, 5).map((j, k) => (
                 <li key={k} className="cursor-pointer text-[12px] leading-[17px]" onClick={() => openEvidence(j.ev)}>
                   <div className="font-medium">{j.title} · {peer(j.peer_id)?.name}</div>
-                  <div className="text-muted">from {j.from_company}</div>
+                  {j.from_company && j.from_company !== "—" && <div className="text-muted">from {j.from_company}</div>}
                 </li>
               ))}
             </ul>
@@ -160,7 +160,7 @@ export function ChordSceneView({ data }: { data: ChordScene }) {
           <Tooltip x={hover.x} y={hover.y}>
             <div className="font-medium">{names[hover.s]} → {names[hover.t]}</div>
             <div className="mt-0.5 font-dot text-[20px] font-black">{hovered.count}</div>
-            <div className="mt-1 text-muted">{hovered.titles.join(" · ")}</div>
+            {hovered.titles.length > 0 && <div className="mt-1 text-muted">{hovered.titles.join(" · ")}</div>}
           </Tooltip>
         )}
       </div>
