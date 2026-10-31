@@ -120,7 +120,8 @@ function Gauge({ value, label }: { value: number; label: string }) {
         <motion.circle cx="32" cy="32" r={r} fill="none" stroke="var(--accent)" strokeWidth="5" strokeLinecap="round"
           strokeDasharray={c} initial={{ strokeDashoffset: c }} animate={{ strokeDashoffset: c * (1 - value / 100) }} transition={{ duration: 1, ease: "easeOut" }} />
       </svg>
-      <div className="absolute text-center leading-none"><div className="font-dot text-[16px] font-black tnum">{value}</div><div className="text-[8px] uppercase tracking-wider text-muted">{label}</div></div>
+      <div className="absolute text-center leading-none"><div className="font-dot text-[16px] font-black tnum">{value}</div></div>
+      <div className="absolute -bottom-3 text-[9px] uppercase tracking-wider text-muted">{label}</div>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { useRun } from "@/lib/run-context";
 import type { FieldRow, FieldScene } from "@/lib/types";
 
 type Pt = FieldScene["frames"][number]["points"][number];
+type PtC = Pt & { cx: number | null; cy: number | null; clamped: boolean };
 
 const PART_LABEL: Record<string, string> = {
   headcount: "Headcount growth", hiring: "Hiring velocity", traffic: "Traffic trend", followers: "Follower growth", funding: "Funding recency",
@@ -18,7 +19,7 @@ const PULL_LABEL: Record<string, string> = {
   organic_share: "Earned share of traffic", keyword_net: "Keywords gained − lost", traffic_per_employee: "Traffic per employee", traffic_growth: "Traffic growth",
 };
 
-const momentumColor = (m: number | null) => (m == null ? "var(--muted)" : `color-mix(in srgb, var(--accent) ${Math.round(20 + m * 0.8)}%, var(--muted))`);
+const momentumColor = (m: number | null) => (m == null ? "var(--muted)" : `color-mix(in srgb, var(--accent) ${Math.round(Math.max(0, m - 20) * 1.25)}%, var(--s-other))`);
 
 export function FieldSceneView({ data }: { data: FieldScene }) {
   const { peer, lens } = useRun();
@@ -44,7 +45,7 @@ export function FieldSceneView({ data }: { data: FieldScene }) {
     <SceneFrame
       id="field" n="02" name="Momentum" title={title}
       legend={
-        <div className="flex max-w-[460px] flex-wrap items-center justify-end gap-x-4 gap-y-2">
+        <div className="flex max-w-[520px] flex-wrap items-center justify-end gap-x-4 gap-y-2 text-fg-2">
           <LegendItem color="var(--accent)" label="High momentum" />
           <LegendItem color="var(--muted)" label="Low momentum" />
           <LegendItem color="var(--red)" label="Distress" kind="ring" />
@@ -63,28 +64,28 @@ export function FieldSceneView({ data }: { data: FieldScene }) {
 function Chart({ data, idx, sel, setSel, rows }: { data: FieldScene; idx: number; sel: number | null; setSel: (id: number | null) => void; rows: Map<number, FieldRow> }) {
   const { peer } = useRun();
   const [ref, { width, height }] = useSize<HTMLDivElement>();
-  const [hover, setHover] = useState<{ p: Pt; x: number; y: number } | null>(null);
+  const [hover, setHover] = useState<{ p: PtC; x: number; y: number } | null>(null);
   const W = Math.max(1, width);
   const H = Math.max(420, height || 0);
-  const M = { t: 24, r: 28, b: 44, l: 56 };
+  const M = { t: 30, r: 28, b: 44, l: 56 };
 
   const { x, y, r, trails, pts, xTicks, yTicks } = useMemo(() => {
     const all = data.frames.flatMap((f) => f.points);
-    const xs = all.map((p) => p.x).filter((v): v is number => v != null);
-    const ys = all.map((p) => p.y).filter((v): v is number => v != null);
-    const pad = (lo: number, hi: number) => [Math.min(lo, -10) - 5, Math.max(hi, 10) + 5] as [number, number];
-    const x = d3.scaleSymlog().constant(25).domain(pad(d3.min(xs) ?? -10, d3.max(xs) ?? 10)).range([M.l, W - M.r]);
-    const y = d3.scaleSymlog().constant(25).domain(pad(d3.min(ys) ?? -10, d3.max(ys) ?? 10)).range([H - M.b, M.t]);
+    // Fixed, clamped domains: a 10-visitor site tripling is not a signal worth stretching the axis for.
+    const XD: [number, number] = [-60, 300];
+    const YD: [number, number] = [-80, 400];
+    const cl = (v: number, d: [number, number]) => Math.max(d[0], Math.min(d[1], v));
+    const x = d3.scaleSymlog().constant(40).domain(XD).range([M.l, W - M.r]).clamp(true);
+    const y = d3.scaleSymlog().constant(40).domain(YD).range([H - M.b, M.t]).clamp(true);
     const r = d3.scaleSqrt().domain([0, d3.max(all, (p) => p.size) || 1]).range([6, 34]);
-    const pts = data.frames[idx]?.points ?? [];
-    const line = d3.line<[number, number]>().curve(d3.curveCatmullRom.alpha(0.6));
+    const pts = (data.frames[idx]?.points ?? []).map((p) => ({ ...p, cx: p.x == null ? null : cl(p.x, XD), cy: p.y == null ? null : cl(p.y, YD), clamped: (p.x != null && (p.x < XD[0] || p.x > XD[1])) || (p.y != null && (p.y < YD[0] || p.y > YD[1])) }));
+    const line = d3.line<[number, number]>().curve(d3.curveBasis);
     const trails = pts.map((p) => {
       const path = data.frames.slice(0, idx + 1).map((f) => f.points.find((q) => q.peer_id === p.peer_id))
-        .filter((q): q is Pt => !!q && q.x != null && q.y != null).map((q) => [x(q.x!), y(q.y!)] as [number, number]);
+        .filter((q): q is Pt => !!q && q.x != null && q.y != null).map((q) => [x(cl(q.x!, XD)), y(cl(q.y!, YD))] as [number, number]);
       return { id: p.peer_id, d: path.length > 1 ? line(path) ?? "" : "", color: momentumColor(p.momentum) };
     });
-    const ticks = (s: d3.ScaleSymLog<number, number>) => s.ticks(6).filter((t) => Number.isInteger(t));
-    return { x, y, r, trails, pts, xTicks: ticks(x), yTicks: ticks(y) };
+    return { x, y, r, trails, pts, xTicks: [-50, 0, 50, 100, 200, 300], yTicks: [-50, 0, 50, 100, 200, 400] };
   }, [data, idx, W, H, M.l, M.r, M.t, M.b]);
 
   const labelled = useMemo(() => new Set([...pts].sort((a, b) => b.size - a.size).slice(0, 6).map((p) => p.peer_id)), [pts]);
@@ -107,20 +108,20 @@ function Chart({ data, idx, sel, setSel, rows }: { data: FieldScene; idx: number
             </g>
           ))}
           <text x={W - M.r} y={H - 6} textAnchor="end" className="fill-[var(--muted)] text-[11px] uppercase tracking-[0.08em]">Headcount · trailing 6 months →</text>
-          <text transform={`translate(14 ${M.t}) rotate(90)`} className="fill-[var(--muted)] text-[11px] uppercase tracking-[0.08em]">Web traffic · trailing 3 months →</text>
+          <text x={M.l} y={M.t - 8} className="fill-[var(--muted)] text-[11px] uppercase tracking-[0.08em]">↑ Web traffic · trailing 3 months</text>
           <text x={W - M.r - 6} y={M.t + 14} textAnchor="end" className="fill-[var(--muted)] text-[11px] italic opacity-70">accelerating</text>
           <text x={M.l + 6} y={H - M.b - 8} className="fill-[var(--muted)] text-[11px] italic opacity-70">stalling</text>
 
           {/* trails */}
-          {trails.map((t) => t.d && (
-            <motion.path key={`t${t.id}`} d={t.d} fill="none" stroke={t.color} strokeWidth={1.5} strokeLinecap="round"
-              initial={false} animate={{ d: t.d, opacity: sel && sel !== t.id ? 0.08 : 0.35 }} transition={{ duration: 0.35 }} />
+          {trails.map((t) => t.d && (sel === t.id || hover?.p.peer_id === t.id || (sel == null && labelled.has(t.id))) && (
+            <motion.path key={`t${t.id}`} d={t.d} fill="none" stroke={t.color} strokeWidth={sel === t.id ? 2 : 1.25} strokeLinecap="round"
+              initial={false} animate={{ d: t.d, opacity: sel === t.id || hover?.p.peer_id === t.id ? 0.7 : 0.28 }} transition={{ duration: 0.35 }} />
           ))}
 
           {/* bubbles */}
           {pts.map((p) => {
-            const missing = p.x == null || p.y == null;
-            const cx0 = x(p.x ?? 0), cy0 = y(p.y ?? 0), rr = r(p.size);
+            const missing = p.cx == null || p.cy == null;
+            const cx0 = x(p.cx ?? 0), cy0 = y(p.cy ?? 0), rr = r(p.size);
             const dim = sel != null && sel !== p.peer_id;
             const dis = (p.distress ?? 0) >= 30;
             const name = peer(p.peer_id)?.name ?? `#${p.peer_id}`;
@@ -146,7 +147,7 @@ function Chart({ data, idx, sel, setSel, rows }: { data: FieldScene; idx: number
                 />
                 {(labelled.has(p.peer_id) || sel === p.peer_id) && (
                   <motion.text initial={false} animate={{ x: cx0 + rr + 6, y: cy0 + 4, opacity: dim ? 0.2 : 1 }} transition={{ duration: 0.35 }}
-                    className="fill-[var(--fg)] text-[12px] font-medium" style={{ pointerEvents: "none" }}>{name}</motion.text>
+                    className="fill-[var(--fg)] text-[12px] font-medium" style={{ pointerEvents: "none" }}>{name}{p.clamped ? " ↗" : ""}</motion.text>
                 )}
               </g>
             );
@@ -187,7 +188,8 @@ function Leaderboard({ ranked, sel, setSel, ev }: { ranked: FieldRow[]; sel: num
           const name = peer(r.peer_id)?.name ?? `#${r.peer_id}`;
           return (
             <div key={r.peer_id} className={cx("border-b border-line last:border-0", open && "bg-bg-2")}>
-              <button onClick={() => setSel(open ? null : r.peer_id)} className="grid w-full grid-cols-[24px_1fr_44px] items-center gap-3 px-4 py-2.5 text-left hover:bg-bg-2">
+              <div role="button" tabIndex={0} onClick={() => setSel(open ? null : r.peer_id)} onKeyDown={(e) => e.key === "Enter" && setSel(open ? null : r.peer_id)}
+                className="grid w-full cursor-pointer grid-cols-[24px_1fr_44px] items-center gap-3 px-4 py-2.5 text-left hover:bg-bg-2">
                 <span className="font-mono text-[11px] text-muted tnum">{String(i + 1).padStart(2, "0")}</span>
                 <span className="min-w-0">
                   <span className="block truncate text-[13px] font-medium">{name}</span>
@@ -200,7 +202,7 @@ function Leaderboard({ ranked, sel, setSel, ev }: { ranked: FieldRow[]; sel: num
                   {(r.distress ?? 0) >= 30 && <span className="size-1.5 rounded-full bg-red" title={`distress ${r.distress}`} />}
                   <Num value={Math.round(r.momentum ?? 0)} ev={ev[r.peer_id]} className="font-mono text-[12px]" />
                 </span>
-              </button>
+              </div>
               {open && <Breakdown r={r} ev={ev[r.peer_id]} />}
             </div>
           );
