@@ -56,7 +56,7 @@ export function DeckSceneView({ data }: { data: DeckScene }) {
 
       {data.diligence_questions && data.diligence_questions.length > 0 && (
         <div className="mt-8 grid gap-6 lg:grid-cols-[220px_1fr]">
-          <div><div className="eyebrow">Diligence questions</div><p className="mt-2 text-[13px] text-muted">What the graph cannot answer. Ask these on the call.</p></div>
+          <div><div className="eyebrow">Diligence questions</div><p className="mt-2 text-[13px] text-muted">What the graph cannot answer.</p></div>
           <ol className="divide-y divide-line rounded-[16px] border border-line">
             {data.diligence_questions.map((q, i) => (
               <li key={q} className="flex gap-4 px-5 py-3 text-[14px]"><span className="font-mono text-[11px] text-muted tnum">{String(i + 1).padStart(2, "0")}</span>{q}</li>
@@ -69,7 +69,7 @@ export function DeckSceneView({ data }: { data: DeckScene }) {
         <div className="flex items-end justify-between">
           <div>
             <div className="flex items-center gap-2"><span className={cx("size-2 rounded-full", live.length ? "bg-green blink" : status === "running" ? "bg-accent blink" : "bg-muted")} /><span className="eyebrow">Watchtower</span></div>
-            <p className="mt-2 max-w-[560px] text-[13px] text-muted">Every peer is watched for headcount changes, new funding rounds and hiring changes. A delta is re-run through the engines, so an alert reads “GTM shift at X”, not “a field changed”.</p>
+            <p className="mt-2 text-[13px] text-muted">Live on Crustdata. Deltas are re-scored by the engines.</p>
           </div>
           <span className="font-mono text-[11px] text-muted">{live.length} live · {data.watches.length} configured</span>
         </div>
@@ -101,7 +101,7 @@ export function DeckSceneView({ data }: { data: DeckScene }) {
         <div className="mt-4">
           <div className="eyebrow !text-[10px]">Alerts</div>
           {data.alerts.length === 0 ? (
-            <div className="mt-2 text-[12px] text-muted">Listening. Nothing has changed since the baseline run.</div>
+            <div className="mt-2 text-[12px] text-muted">Listening.</div>
           ) : data.alerts.map((a) => (
             <div key={a.ts + a.headline} className="mt-2 flex items-baseline gap-3 text-[13px]"><span className="font-mono text-[11px] text-muted">{a.ts.slice(0, 10)}</span><span className="rounded-full bg-bg-2 px-2 text-[11px]">{a.engine}</span><Num value={a.headline} ev={a.ev} /></div>
           ))}

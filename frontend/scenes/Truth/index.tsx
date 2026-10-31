@@ -59,7 +59,7 @@ export function TruthSceneView({ data }: { data: TruthScene }) {
       </div>
 
       {tab === "claims" && (
-        data.claims.length === 0 ? <EmptyNote text={lens === "investor" ? "No homepage claims could be extracted for the target." : "Switch to the Investor lens to check the target's own claims against the graph."} /> : (
+        data.claims.length === 0 ? <EmptyNote text={lens === "investor" ? "No checkable claims on the homepage." : "Switch to Investor to check the target's claims."} /> : (
           <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {data.claims.map((c, i) => {
               const s = STATUS[c.status];
@@ -82,7 +82,7 @@ export function TruthSceneView({ data }: { data: TruthScene }) {
       )}
 
       {tab === "disputes" && (
-        data.disputes.length === 0 ? <EmptyNote text="No field-level conflicts in this run. Every headcount agreed with its own timeseries and declared band." /> : (
+        data.disputes.length === 0 ? <EmptyNote text="No conflicts in this run." /> : (
           <div className="mt-5 grid gap-3 lg:grid-cols-2">
             {data.disputes.map((d, i) => {
               const sev = (d as { severity?: string }).severity ?? "high";

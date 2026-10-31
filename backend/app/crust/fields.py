@@ -9,8 +9,10 @@ SEARCH_FIELDS = [
 ]
 
 # Full projection for the seven scenes via /company/enrich
+# people.decision_makers alone was 5.1 MB of a 5.5 MB Five9 response, so only founders + CXOs are requested.
 ENRICH_FIELDS = [
-    "basic_info", "headcount", "hiring", "funding", "web_traffic", "news", "people",
+    "basic_info", "headcount", "hiring", "funding", "web_traffic", "news",
+    "people.founders", "people.cxos",
     "competitors", "followers", "seo", "revenue", "taxonomy", "locations",
     "employee_reviews", "software_reviews",
 ]
