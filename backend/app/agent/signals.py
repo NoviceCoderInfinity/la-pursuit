@@ -163,7 +163,7 @@ async def _talent(live: list[Peer], client: CrustClient, tracer: Tracer, out: di
 
 
 AMBIGUOUS = set("""fin bland linear glean ramp harvey notion apple square block mercury scale figure cursor loom gusto
-deel brex plaid stripe swiggy zepto blinkit""".split())
+deel brex plaid stripe swiggy zepto blinkit rasa mercury ramp""".split())
 
 
 def _news(live: list[Peer], companies: dict[int, dict[str, Any]], tracer: Tracer, out: dict[str, Any]) -> None:

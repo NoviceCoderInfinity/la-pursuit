@@ -38,7 +38,8 @@ def _people_links(run: "Run", pid: int, limit: int = 3) -> list[dict[str, str]]:
 
 FOCUS_LEADS = {
     "talent": ("Poaching", "Recruit"), "gtm": ("Hiring sales", "Brace"), "expansion": ("Defend",), "capital": ("Pitch", "Syndicate"),
-    "distress": ("Wedge",), "crowded": ("Market is",), "threat": ("Threat",), "momentum": ("Strong", "Dig deeper", "Pass", "Threat", "Incumbent"),
+    "distress": ("Wedge",), "crowded": ("Market is",), "threat": ("Threat",),
+    "momentum": ("Strong", "Dig deeper", "Pass", "Winning", "Threat", "Incumbent"),
 }
 
 
@@ -86,14 +87,24 @@ def _build_deck(run: "Run", lens: str) -> dict[str, Any]:
            0.8 if rank else 0.5, [m.get("ev")] + target.ev, "field", _people_links(run, target.id))
         if ranked:
             named = {n.lower() for n in (run.intent.compare_with if run.intent else [])}
-            rival = next((p for p in ranked if p.id != target.id and p.name.lower() in named), None) \
-                or next((p for p in ranked if p.id != target.id), None)
-            if rival:
-                rm = per[rival.id]
-                mv(f"Price the competition: {rival.name} is the fastest-moving peer",
-                   f"{rival.name} momentum {rm['momentum']:.0f}/100 with {_fmt_usd(rival.raised_usd)} raised and {rival.headcount or '?'} people"
-                   f"{' and a GTM shift detected ' + str(rm['gtm'].get('since')) if (rm.get('gtm') or {}).get('detected') else ''}.",
-                   0.7, [rm.get("ev")] + rival.ev, "streams" if (rm.get("gtm") or {}).get("detected") else "field")
+            head = next((p for p in run.peers if p.id != target.id and p.id in per and p.name.lower() in named), None)
+            if head:
+                hm, tm = per[head.id], per[target.id]
+                def cmpv(a: float | None, b: float | None, unit: str = "%") -> str:
+                    return f"{a or 0:+.0f}{unit} vs {b or 0:+.0f}{unit}"
+                ahead = (hm["momentum"] or 0) > (tm["momentum"] or 0)
+                mv(f"{head.name} {'is' if ahead else 'is not'} pulling ahead: {target.name} {tm['momentum'] or 0:.0f} vs {head.name} {hm['momentum'] or 0:.0f} on momentum",
+                   f"Headcount 6 months {cmpv(tm['hc_growth_6m'], hm['hc_growth_6m'])}; web traffic QoQ {cmpv(tm['traffic_qoq'], hm['traffic_qoq'])}; "
+                   f"raised {_fmt_usd(target.raised_usd)} vs {_fmt_usd(head.raised_usd)}; roles added in 90 days {tm['jobs_90d'] or 0} vs {hm['jobs_90d'] or 0}.",
+                   0.8, [tm.get("ev"), hm.get("ev")] + target.ev[:1] + head.ev[:1], "field", _people_links(run, head.id, 2))
+            else:
+                rival = next((p for p in ranked if p.id != target.id), None)
+                if rival:
+                    rm = per[rival.id]
+                    mv(f"Price the competition: {rival.name} is the fastest-moving peer",
+                       f"{rival.name} momentum {rm['momentum']:.0f}/100 with {_fmt_usd(rival.raised_usd)} raised and {rival.headcount or '?'} people"
+                       f"{' and a GTM shift detected ' + str(rm['gtm'].get('since')) if (rm.get('gtm') or {}).get('detected') else ''}.",
+                       0.7, [rm.get("ev")] + rival.ev, "streams" if (rm.get("gtm") or {}).get("detected") else "field")
         if kingmakers:
             inv = kingmakers[0]
             backed = [pidx[i].name for i in cap["investors"][inv]["peers"] if i in pidx]
@@ -135,6 +146,17 @@ def _build_deck(run: "Run", lens: str) -> dict[str, Any]:
             for mvx in run.signals.get("moves", []):
                 if mvx["from"] == me.id and mvx["to"] != me.id:
                     took.setdefault(mvx["to"], []).append(mvx.get("title") or "")
+            came: dict[int, int] = {}
+            for mvx in run.signals.get("moves", []):
+                if mvx["to"] == me.id and mvx["from"] != me.id:
+                    came[mvx["from"]] = came.get(mvx["from"], 0) + 1
+            if not took and came:
+                src_id, n_src = max(came.items(), key=lambda kv: kv[1])
+                src = pidx.get(src_id)
+                mv("Poaching: no rival is taking your people",
+                   f"None of {me.name}'s people left for these {len(run.peers) - 1} rivals in the data; {sum(came.values())} joined you from them"
+                   + (f", most from {src.name} ({n_src})" if src else "") + ". You are the one hiring away.",
+                   0.7, run.signals.get("moves_ev", [])[:2], "chord")
             if took:
                 pid, titles = max(took.items(), key=lambda kv: len(kv[1]))
                 p = pidx.get(pid)
@@ -185,6 +207,12 @@ def _build_deck(run: "Run", lens: str) -> dict[str, Any]:
         mv(f"Pitch {inv} first: they back {len(backed)} peers",
            f"{inv} is in {', '.join(backed[:4])}. {len(kingmakers)} investors have ≥2 bets here; {len(open_slots)} have one bet and room for a second.",
            0.7, [pidx[i].ev[1] for i in cap["investors"][inv]["peers"] if i in pidx and len(pidx[i].ev) > 1][:3], "constellation")
+    if ranked:
+        lead = [p for p in ranked if not p.is_seed][:3]
+        if lead:
+            mv(f"Winning: {', '.join(p.name for p in lead)} lead on momentum",
+               "; ".join(f"{p.name} {per[p.id]['momentum']:.0f} (headcount {per[p.id]['hc_growth_6m'] or 0:+.0f}% in 6 months)" for p in lead) + ".",
+               0.75, [per[p.id].get("ev") for p in lead], "field")
     if distressed:
         d = distressed[0]
         mv(f"Wedge: {d.name}'s customers — it is weakening",

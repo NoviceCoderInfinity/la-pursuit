@@ -385,7 +385,14 @@ class Discovery:
             for _, c in dropped:
                 c.status, c.reason = "rejected", "ranked below the top peers"
             accepted = accepted[:settings.max_peers]
-        peers = [c for _, c in accepted]
+        peers, seen_names = [], set()
+        for _, c in accepted:  # "ElevenLabs" and "Eleven Labs" are one company: keep the larger record
+            key = _norm_name(c.name)
+            if key in seen_names or (self.seed and key == _norm_name(self.seed.name)):
+                c.status, c.reason = "rejected", "duplicate of a company already in the set"
+                continue
+            seen_names.add(key)
+            peers.append(c)
         if self.seed:
             self.seed.status = "accepted"
             peers.insert(0, self.seed)
