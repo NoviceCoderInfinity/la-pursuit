@@ -156,7 +156,9 @@ function Ledger({ calls, total, endpoints, credits, onOpen }: {
         <div className="mt-2 flex flex-wrap gap-1">
           {endpoints.map((e) => <span key={e} className="rounded-full bg-bg-2 px-2 py-0.5 font-mono text-[10px] text-fg-2">{e}</span>)}
         </div>
-        {credits != null && <div className="mt-2 font-mono text-[11px] text-muted">{credits.toFixed(1)} credits spent</div>}
+        <div className="mt-2 font-mono text-[11px] text-muted">
+          {credits ? `${credits.toFixed(1)} credits spent` : calls.length && calls.every((c) => c.detail?.cached) ? "served from cache · 0 credits" : "0 credits"}
+        </div>
       </div>
       <div className="max-h-[560px] flex-1 overflow-y-auto">
         {calls.map((e, i) => (

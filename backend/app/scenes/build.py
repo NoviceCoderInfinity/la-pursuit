@@ -230,7 +230,8 @@ def claims(run: "Run") -> list[dict[str, Any]]:
         j90 = (run.signals.get("jobs", {}).get(pid) or {}).get("total_90d")
         ok = (n or 0) > 0 or (j90 or 0) > 0
         add("we're hiring", "verified" if ok else ("contradicted" if n is not None else "unverifiable"),
-            f"graph: {n if n is not None else '?'} open roles, {j90 if j90 is not None else '?'} added in 90 days", p.ev[:1])
+            "graph: " + ", ".join(x for x in [f"{n} open roles" if n is not None else "", f"{j90} roles added in 90 days" if j90 is not None else ""] if x)
+            or "graph has no hiring data", p.ev[:1])
     # team size
     for m in re.finditer(r"(?:team of|we have|we are|we're|our team of|employs?|employing|more than|over|with)\s+" + NUM + r"\s+(employees|people on the team|team members|teammates|engineers|people)", text, re.I):
         v = _num(m.group(1), m.group(2))

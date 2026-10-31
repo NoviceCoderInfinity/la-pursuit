@@ -33,7 +33,7 @@ uvicorn app.server:app --port 8001
 cd frontend && npm i && API_ORIGIN=http://127.0.0.1:8001 npm run dev     # http://localhost:3000
 ```
 
-Without a backend the UI falls back to `fixtures/voice_ai.json`, a real recorded run.
+Without a backend the UI replays `fixtures/voice_ai.json`, a real recorded run (trace, scenes and evidence). See `DEMO.md` for the run book.
 
 ### CLI
 ```bash
@@ -61,4 +61,6 @@ Tools: `market_map(query, lens)`, `identify_company(name_or_domain)`, `talent_fl
 - Every API call is cached on disk by request hash; demo re-runs are instant, new queries are fully live.
 
 ## Repo
-`backend/app` — client, ledger, trace, agent stages, engines, scenes, deck, server, cli, mcp_server · `frontend/` — Next.js 15 app · `fixtures/` — recorded runs · `plan.md`, `features.md`, `PRD.md` — design docs.
+`backend/app` — client, ledger, trace, agent stages, engines, scenes, deck, server, cli, mcp_server · `backend/tests/smoke_api.py` — end-to-end check against a running server · `frontend/` — Next.js 15 app · `fixtures/` — recorded runs · `DEMO.md` — run book · `plan.md`, `features.md`, `PRD.md` — design docs.
+
+Built by Aman Verma and Anupam.
