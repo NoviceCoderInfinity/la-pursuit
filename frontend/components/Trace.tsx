@@ -40,7 +40,7 @@ export function StageBar() {
 }
 
 export function Trace({ compact }: { compact?: boolean }) {
-  const { trace, credits } = useRun();
+  const { trace, credits, peers } = useRun();
   const list = useRef<HTMLDivElement>(null);
   // Scroll only the trace pane, never the page.
   useEffect(() => {
@@ -49,7 +49,8 @@ export function Trace({ compact }: { compact?: boolean }) {
   }, [trace.length]);
 
   const calls = trace.filter((e) => e.type === "tool_call").length;
-  const accepted = trace.filter((e) => e.decision?.kind === "accept" && e.stage === "discover").length;
+  // Final peer set once enrich reports it; until then, candidates accepted so far (before narrowing).
+  const accepted = peers.length || trace.filter((e) => e.decision?.kind === "accept" && e.stage === "discover").length;
   const rejected = trace.filter((e) => e.decision?.kind === "reject").length;
 
   return (
