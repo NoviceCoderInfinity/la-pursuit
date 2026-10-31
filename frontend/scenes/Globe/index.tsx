@@ -1,6 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { ActionText } from "@/components/ActionText";
+import { globeAction } from "@/lib/actions";
 import { useCallback, useMemo, useState } from "react";
 import { Num } from "@/components/Num";
 import { LegendItem, SceneFrame, Scrubber, cssVar, useSize, useTheme } from "@/components/ui";
@@ -23,6 +25,7 @@ type Arc = GlobeScene["arcs"][number] & { from: { lat: number; lng: number } };
 
 export function GlobeSceneView({ data }: { data: GlobeScene }) {
   const { peer, openEvidence, lens } = useRun();
+  const nameOf = (id: number) => peer(id)?.name ?? `#${id}`;
   const theme = useTheme();
   const [box, size] = useSize<HTMLDivElement>();
   const [on, setOn] = useState<Record<Layer, boolean>>({ people: true, hiring: true, talent: false, expansion: true });
@@ -109,7 +112,7 @@ export function GlobeSceneView({ data }: { data: GlobeScene }) {
 
   return (
     <SceneFrame
-      id="globe" n="01" name="Atlas" title={title}
+      id="globe" n="01" name="Atlas" title={title} action={<ActionText a={globeAction(data, lens, nameOf)} />}
       legend={
         <div className="flex flex-wrap items-center gap-4">
           <LegendItem color={accent} label="People" />

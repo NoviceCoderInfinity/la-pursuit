@@ -82,7 +82,7 @@ def build_deck(run: "Run", lens: str) -> dict[str, Any]:
              "How much of monthly traffic is paid versus earned, and at what CAC?",
              "Who are the senior hires from the last six months and why did they join?",
              "Which peer would you least like to see raise next, and why?"]
-        return {"lens": lens, "target_id": target.id, "moves": moves[:3], "diligence_questions": q, "watches": [], "alerts": []}
+        return {"lens": lens, "target_id": target.id, "moves": moves[:3], "diligence_questions": q, "watches": [], "alerts": recent_signals(run)}
 
     if lens == "operator":
         me = seed or (ranked[0] if ranked else None)
@@ -115,7 +115,7 @@ def build_deck(run: "Run", lens: str) -> dict[str, Any]:
             mv(f"Recruit from {p.name}: net talent loser in this market",
                f"{r['outflow']} people left {p.name} for peers vs {r['inflow']} joined{sent}. Senior hires there are reachable.",
                0.6, run.signals.get("moves_ev", [])[:1] + p.ev[:1], "chord", _people_links(run, p.id, 2))
-        return {"lens": lens, "target_id": me.id if me else None, "moves": moves[:3], "watches": [], "alerts": []}
+        return {"lens": lens, "target_id": me.id if me else None, "moves": moves[:3], "watches": [], "alerts": recent_signals(run)}
 
     # founder lens
     n = len(run.peers)
@@ -144,7 +144,7 @@ def build_deck(run: "Run", lens: str) -> dict[str, Any]:
         mv(f"Incumbent to avoid head-on: {top.name}",
            f"Momentum {per[top.id]['momentum']:.0f}/100, {top.headcount or '?'} people, {_fmt_usd(top.raised_usd)} raised. Position around it, not against it.",
            0.6, [per[top.id].get("ev")] + top.ev, "field", _people_links(run, top.id, 2))
-    return {"lens": lens, "target_id": None, "moves": moves[:3], "watches": [], "alerts": [],
+    return {"lens": lens, "target_id": None, "moves": moves[:3], "watches": [], "alerts": recent_signals(run),
             "market_stage": stage, "crowdedness": crowd}
 
 
@@ -198,3 +198,51 @@ async def register_watches(run: "Run") -> list[dict[str, Any]]:
             t.decide("degrade", "discovery watch", e.message)
     t.done("watch", f"{sum(1 for w in out if w.get('id') and w.get('id') != 'preview')} watches live · {len(out)} configured", watches=len(out))
     return out
+
+
+SIGNAL_WINDOW_DAYS = 120
+_NEWS_EVENT = __import__("re").compile(r"\b(raises?|raised|funding|series [a-e]|acquir|acquisition|launch(es|ed)?|partners? with|layoffs?|lays off|ipo|valuation)\b", __import__("re").I)
+
+
+def recent_signals(run: "Run") -> list[dict[str, Any]]:
+    """What changed in this market lately, from the data we already hold. Every item is cited."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=SIGNAL_WINDOW_DAYS)).strftime("%Y-%m-%d")
+    pidx = {p.id: p for p in run.peers}
+    per = run.engines.get("per_peer", {}) if run.engines else {}
+    out: list[dict[str, Any]] = []
+    for p in run.peers:
+        cd = run.companies.get(p.id) or {}
+        for ms in (cd.get("funding") or {}).get("milestones") or []:
+            d = (ms.get("funding_date") or ms.get("date") or "")[:10]
+            if d and d >= cutoff and not ms.get("is_fund"):
+                rnd = (ms.get("round_type") or "round").replace("_", " ")
+                amt = _fmt_usd(ms.get("amount_usd")) if ms.get("amount_usd") else "undisclosed"
+                out.append({"ts": d, "peer_id": p.id, "engine": "capital", "headline": f"{p.name} raised {amt} ({rnd})", "ev": p.ev[1:2] or p.ev[:1]})
+        g = (per.get(p.id) or {}).get("gtm") or {}
+        if g.get("detected") and g.get("since"):
+            out.append({"ts": f"{g['since']}-01", "peer_id": p.id, "engine": "gtm", "headline": f"{p.name} shifted to selling: {g['reason'].split(';')[0]}",
+                        "ev": [e for e in [(per.get(p.id) or {}).get("ev")] if e]})
+        for nr in ((run.signals.get("geo") or {}).get(p.id) or {}).get("new_regions", []):
+            if nr["since"] >= cutoff:
+                out.append({"ts": nr["since"], "peer_id": p.id, "engine": "expansion", "headline": f"{p.name} started hiring in {nr['label']} ({nr['count']} people)", "ev": p.ev[:1]})
+        for n in ((run.signals.get("news") or {}).get(p.id) or {}).get("kept", [])[:6]:
+            if (n.get("date") or "") >= cutoff and _NEWS_EVENT.search(n.get("title") or ""):
+                out.append({"ts": n["date"], "peer_id": p.id, "engine": "news", "headline": n["title"][:140], "ev": p.ev[:1], "url": n.get("url")})
+    for j in run.signals.get("senior_joins", []) or []:
+        p = pidx.get(j.get("peer_id"))
+        if p and (j.get("date") or "") >= cutoff and j.get("title"):
+            src = f" from {j['from_company']}" if j.get("from_company") and j["from_company"] != "—" else ""
+            out.append({"ts": j["date"], "peer_id": p.id, "engine": "talent", "headline": f"{p.name} hired a {j['title']}{src}",
+                        "ev": [j["ev"]] if isinstance(j.get("ev"), str) else (j.get("ev") or [])})
+    out.sort(key=lambda a: a["ts"], reverse=True)
+    # keep the feed varied: at most 3 of the same engine in the first 12
+    seen: dict[str, int] = {}
+    feed = []
+    for a in out:
+        if seen.get(a["engine"], 0) >= 4:
+            continue
+        seen[a["engine"]] = seen.get(a["engine"], 0) + 1
+        feed.append(a)
+        if len(feed) >= 14:
+            break
+    return feed

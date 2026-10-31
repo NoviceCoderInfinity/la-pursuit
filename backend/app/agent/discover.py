@@ -20,6 +20,7 @@ SERVICES = re.compile(r"\b(agency|agencies|consultanc(y|ies)|consulting|freelanc
                       r"custom ai|development company|for (?:our )?clients|delivered \d+\+? (?:projects|solutions))\b", re.I)
 SERVICES_NAME = re.compile(r"\b(solutions|infosolutions|infotech|infosystems|services|pvt|technologies llc|softwares?|"
                            r"ltd|limited|llp|global)\b", re.I)
+LAW_FIRM = re.compile(r"\b(llp|law firm|solicitors|attorneys at law|barristers|chartered accountants|cpa firm)\b", re.I)
 AGG_DOMAINS = ("linkedin.com", "crunchbase.com", "g2.com", "capterra.com", "producthunt.com", "wikipedia.org",
                "medium.com", "reddit.com", "youtube.com", "github.com", "techcrunch.com", "forbes.com", "google.com")
 
@@ -82,9 +83,11 @@ class Discovery:
         b, tax = m.get("basic_info", {}), m.get("taxonomy", {}) or {}
         desc = b.get("description") or ""
         cats = tax.get("categories") or []
-        self.market = f"{self.seed.name}: {desc[:300]}"
-        self.intent.market_description = _market_sentence(self.seed.name, desc, cats)
-        self.keywords = " ".join(sorted(tokens(desc))[:12] + [c.lower() for c in cats])
+        specs = tax.get("professional_network_specialities") or []
+        spec = specific_cats(cats, specs)
+        self.market = f"{self.seed.name}: {desc[:300]}" + (f" Categories: {', '.join(spec)}." if spec else "")
+        self.intent.market_description = _market_sentence(self.seed.name, desc, cats, specs)
+        self.keywords = " ".join(sorted(tokens(desc))[:12] + [c.lower() for c in spec])
         self.seed.description, self.seed.categories = desc, cats
         self.seed.headcount = (m.get("headcount") or {}).get("total")
         self.seed.raised_usd = (m.get("funding") or {}).get("total_investment_usd")
@@ -285,6 +288,12 @@ class Discovery:
             return False, "services/agency firm, not a product company in this market", 0
         if SERVICES_NAME.search(c.name) and not (c.raised_usd or 0) and c.source != "competitors":
             return False, "services-style company name with no funding signal", 0
+        if LAW_FIRM.search(c.name + " " + desc[:200]) and not LAW_FIRM.search(self.intent.market_description):
+            return False, "a firm that sells services, not a product in this market", 0
+        if self.seed and self._namesake(c) and len(core_hit) < 2:
+            return False, f"shares the name “{self.seed.name}” but not the market", 0
+        if (c.headcount or 0) < 10 and not (c.raised_usd or 0):
+            return False, f"too small to matter ({c.headcount or '?'} people, no funding)", 0
         corroborated = c.source in ("competitors", "web")
         need = 1 if corroborated else min(2, len(self.core - self.geo))
         if len(core_hit) < need and rel < 0.35:
@@ -296,6 +305,11 @@ class Discovery:
             src = "listed as a competitor" if c.source == "competitors" else "named on the web"
             return True, f"{src} of {self.seed.name if self.seed else 'the market'}; shares: {shown or 'category'}", score
         return True, f"matches on: {shown} · {c.headcount or '?'} people", score
+
+    def _namesake(self, c: Candidate) -> bool:
+        seed_core = {t for t in re.findall(r"[a-z0-9]+", (self.seed.name if self.seed else "").lower()) if len(t) >= 3 and t not in ("inc", "the")}
+        cand = set(re.findall(r"[a-z0-9]+", (c.name or "").lower())) | set(re.findall(r"[a-z0-9]+", (c.domain or "").split(".")[0].lower()))
+        return bool(seed_core & cand) or any(t in (c.domain or "").lower() for t in seed_core)
 
     async def run(self) -> list[Candidate]:
         t = self.tracer
@@ -343,15 +357,30 @@ class Discovery:
             self.seed.status = "accepted"
             peers.insert(0, self.seed)
         t.done("discover", f"{len(peers)} peers qualified from {len(self.candidates)} candidates",
-               peers=[p.name for p in peers], candidates=len(self.candidates))
+               peers=[p.name for p in peers], candidates=len(self.candidates), market=self.intent.market_description)
         return peers
 
 
-def _market_sentence(name: str, desc: str, cats: list[str]) -> str:
-    first = re.split(r"(?<=[.!?])\s", desc.strip())[0] if desc else ""
-    first = re.sub(rf"^{re.escape(name)}\s+(is|builds|provides|offers|helps|makes)\s+", "", first, flags=re.I)
-    if cats:
-        return f"{first[:160]} ({', '.join(cats[:4])})"
+GENERIC_CATS = {"artificial intelligence (ai)", "artificial intelligence", "software", "information technology", "computer",
+                "enterprise software", "saas", "machine learning", "generative ai", "cloud computing", "internet", "technology",
+                "agentic ai", "blockchain", "security", "cyber security", "edtech", "education", "video", "infrastructure",
+                "data integration", "communication hardware", "mobile", "apps", "analytics", "big data"}
+
+
+def specific_cats(cats: list[str], specs: list[str] | None = None) -> list[str]:
+    """Drop the tags every tech company carries; keep the ones that say what it sells."""
+    return [c for c in (specs or []) + cats if c.lower() not in GENERIC_CATS][:6]
+
+
+def _market_sentence(name: str, desc: str, cats: list[str], specs: list[str] | None = None) -> str:
+    sents = [x for x in re.split(r"(?<=[.!?])\s", desc.strip()) if x] if desc else []
+    first = sents[0] if sents else ""
+    if len(sents) > 1 and len(terms(first)) < 3:  # mission line ("Work AI for all."): the next sentence says what it does
+        first = f"{first} {sents[1]}"
+    first = re.sub(rf"^(at\s+)?{re.escape(name)}[,]?\s+(is|builds|provides|offers|helps|makes|we are)?\s*", "", first, flags=re.I)
+    spec = specific_cats(cats, specs)
+    if spec:
+        return f"{first[:180]} ({', '.join(spec[:4])})"
     return first[:200] or f"the market {name} competes in"
 
 

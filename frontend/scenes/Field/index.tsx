@@ -1,6 +1,8 @@
 "use client";
 
 import * as d3 from "d3";
+import { ActionText } from "@/components/ActionText";
+import { fieldAction } from "@/lib/actions";
 import { motion } from "framer-motion";
 import { useMemo, useState } from "react";
 import { Num } from "@/components/Num";
@@ -23,6 +25,7 @@ const momentumColor = (m: number | null) => (m == null ? "var(--muted)" : `color
 
 export function FieldSceneView({ data }: { data: FieldScene }) {
   const { peer, lens, scenes } = useRun();
+  const nameOf = (id: number) => peer(id)?.name ?? `#${id}`;
   const dates = data.frames.map((f) => f.date);
   const [idx, setIdx] = useState(Math.max(0, dates.length - 1));
   const [sel, setSel] = useState<number | null>(null);
@@ -49,7 +52,7 @@ export function FieldSceneView({ data }: { data: FieldScene }) {
 
   return (
     <SceneFrame
-      id="field" n="02" name="Momentum" title={title}
+      id="field" n="02" name="Momentum" title={title} action={<ActionText a={fieldAction(data, lens, nameOf, scenes.deck?.target_id ?? null)} />}
       legend={
         <div className="flex max-w-[520px] flex-wrap items-center justify-end gap-x-4 gap-y-2 text-fg-2">
           <LegendItem color="var(--accent)" label="High momentum" />

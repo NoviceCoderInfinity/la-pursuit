@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
 
 from app.crust.client import CrustClient, CrustError
@@ -12,7 +13,7 @@ from app.trace import Tracer
 
 BATCH = 4
 GIANT = 2000          # people; these enrich slowly, so each gets its own call
-ENRICH_TIMEOUT_S = 45  # past this a company keeps search-level data (shown as a degrade in the trace)
+ENRICH_TIMEOUT_S = int(os.getenv("VANTAGE_ENRICH_TIMEOUT", "45"))  # past this a company keeps search-level data (traced)
 
 
 async def enrich_peers(cands: list[Candidate], client: CrustClient, tracer: Tracer, ledger: Ledger

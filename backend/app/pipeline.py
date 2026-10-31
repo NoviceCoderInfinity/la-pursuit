@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import json
 import secrets
 from datetime import datetime, timezone
@@ -54,6 +55,12 @@ class Run:
             if until == "intent": return self._finish()
             self.seed = await resolve_seed(self.intent, self.query, self.client, t)
             if until == "resolve": return self._finish()
+            if self.intent.kind == "company" and not self.seed and len(self.query.split()) >= 2 \
+                    and not self.intent.seed_domain and not re.search(r"\b(we are|we're|invest in|back)\b", self.query, re.I):
+                # "AI coding assistants" is not a company that failed to resolve; it is a market
+                t.decide("widen", self.query, "no company by that name on the graph; mapping it as a market instead")
+                self.intent.kind, self.intent.seed_company_name = "market", None
+                self.intent.market_description = self.query.strip(" .?!")
             if self.intent.kind == "company" and not self.seed:
                 # Honest failure: never build a market around a company we could not find.
                 self.error = f"Could not resolve “{self.intent.seed_company_name or self.query}” on the identity graph"
@@ -97,6 +104,48 @@ class Run:
         self.credits_end = await self.client.credits()
         await self.client.aclose()
 
+    def decks(self) -> dict[str, Any]:
+        from app.agent.deck import build_deck
+        if not self.engines:
+            return {}
+        watches = (self.scenes.get("deck") or {}).get("watches", [])
+        out = {}
+        for lens in ("operator", "investor", "founder"):
+            try:
+                out[lens] = {**build_deck(self, lens), "watches": watches}
+            except Exception:  # noqa: BLE001
+                continue
+        return out
+
+    def summary(self) -> dict[str, Any]:
+        per = self.engines.get("per_peer", {}) if self.engines else {}
+        truth = self.scenes.get("truth") or {}
+        top = sorted((p for p in self.peers if p.momentum is not None), key=lambda p: -(p.momentum or 0))[:6]
+        deck = self.scenes.get("deck") or {}
+        jobs = self.signals.get("jobs", {}) if self.signals else {}
+        cap = self.engines.get("capital", {}) if self.engines else {}
+        return {
+            "query": self.query, "lens": self.lens, "kind": self.intent.kind if self.intent else None,
+            "market": self.intent.market_description if self.intent else None,
+            "seed": self.seed.name if self.seed else None,
+            "created": self.created, "peers": len(self.peers),
+            "people": sum(p.headcount or 0 for p in self.peers),
+            "raised_usd": sum(p.raised_usd or 0 for p in self.peers),
+            "jobs_90d": sum((j or {}).get("total_90d") or 0 for j in jobs.values()),
+            "moves": len((self.signals or {}).get("moves", [])),
+            "investors": len(cap.get("investors", {})),
+            "claims_verified": sum(1 for c in truth.get("claims", []) if c.get("status") == "verified"),
+            "claims_contradicted": sum(1 for c in truth.get("claims", []) if c.get("status") == "contradicted"),
+            "disputes": len(truth.get("disputes", [])),
+            "rejected": len(truth.get("rejected_candidates", [])),
+            "calls": len(self.ledger.calls()), "evidence": len(self.ledger),
+            "watches": sum(1 for w in deck.get("watches", []) if w.get("id") and w.get("id") != "preview"),
+            "headline": (deck.get("moves") or [{}])[0].get("title"),
+            "gtm_shifts": sum(1 for v in per.values() if (v.get("gtm") or {}).get("detected")),
+            "top": [{"id": p.id, "name": p.name, "domain": p.domain, "logo": p.logo, "momentum": p.momentum} for p in top],
+            "error": self.error,
+        }
+
     def report(self) -> dict[str, Any]:
         return {
             "run_id": self.id, "query": self.query, "created": self.created, "lens": self.lens,
@@ -109,6 +158,7 @@ class Run:
             "ledger": [e.model_dump() for e in self.ledger.entries()],
             "trace": [e.model_dump() for e in self.tracer.events],
             "credits_used": round(self.credits_start - self.credits_end, 2) if (self.credits_start and self.credits_end) else 0,
+            "decks": self.decks(), "summary": self.summary() if self.done else None,
             "error": self.error,
         }
 

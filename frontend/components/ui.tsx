@@ -4,7 +4,8 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cx } from "@/lib/format";
-import type { Lens } from "@/lib/types";
+import { PERSONA_SCENES, useRunMaybe } from "@/lib/run-context";
+import type { Lens, SceneKey } from "@/lib/types";
 
 export function Logo({ className }: { className?: string }) {
   return (
@@ -108,12 +109,16 @@ export function useSize<T extends HTMLElement>() {
 
 /** Full-bleed scene frame: index + one-sentence title top-left, legend top-right, controls bottom. */
 export function SceneFrame({
-  id, n, name, title, legend, controls, aside, children, className,
+  id, n, name, title, action, legend, controls, aside, children, className,
 }: {
-  id: string; n: string; name: string; title: React.ReactNode;
+  id: string; n: string; name: string; title: React.ReactNode; action?: React.ReactNode;
   legend?: React.ReactNode; controls?: React.ReactNode; aside?: React.ReactNode;
   children: React.ReactNode; className?: string;
 }) {
+  // Number scenes by their position in the active persona's story, not a fixed global order.
+  const run = useRunMaybe();
+  const order = run ? PERSONA_SCENES[run.lens].indexOf(id as SceneKey) : -1;
+  if (order >= 0) n = String(order + 1).padStart(2, "0");
   return (
     <motion.section
       id={id}
@@ -130,6 +135,11 @@ export function SceneFrame({
             <span className="eyebrow">{name}</span>
           </div>
           <h2 className="display mt-4">{title}</h2>
+          {action && (
+            <div className="mt-4 inline-flex max-w-full items-start gap-2 rounded-2xl bg-[color-mix(in_srgb,var(--accent)_10%,transparent)] px-3.5 py-2 text-[14px] leading-[20px] text-fg">
+              <span className="mt-px shrink-0 font-semibold text-accent">→</span><span>{action}</span>
+            </div>
+          )}
         </div>
         {legend && <div className="pt-1">{legend}</div>}
       </div>

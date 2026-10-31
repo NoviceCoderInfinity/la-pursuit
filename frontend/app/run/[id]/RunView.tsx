@@ -4,10 +4,13 @@ import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { EvidenceDrawer } from "@/components/EvidenceDrawer";
+import { RunBrief } from "@/components/RunBrief";
 import { StageBar, Trace } from "@/components/Trace";
 import { Empty, LENSES, Logo, SceneFrame, Segmented, ThemeToggle } from "@/components/ui";
 import { cx } from "@/lib/format";
-import { RunProvider, SCENES, useRun } from "@/lib/run-context";
+import { startRun } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { RunProvider, scenesFor, useRun } from "@/lib/run-context";
 import type { Lens, SceneKey, Scenes } from "@/lib/types";
 import { ChordSceneView } from "@/scenes/Chord";
 import { ConstellationSceneView } from "@/scenes/Constellation";
@@ -49,6 +52,7 @@ function Shell() {
     return () => clearTimeout(t);
   }, [run.status]);
 
+  const SCENES = scenesFor(run.lens);
   const ready = SCENES.filter((s) => run.scenes[s.key]);
 
   return (
@@ -58,7 +62,12 @@ function Shell() {
           <Logo />
           <div className="mx-auto hidden min-w-0 max-w-[520px] flex-1 items-center justify-center gap-2 md:flex">
             <span className="truncate text-[13px] text-fg-2">{run.query}</span>
-            {run.mock && <span className="eyebrow shrink-0 rounded-full border border-line-2 px-2 py-0.5 !text-[10px]">Sample data</span>}
+            {run.mock && (
+              <span className="eyebrow inline-flex shrink-0 items-center gap-1.5 rounded-full border border-line-2 px-2 py-0.5 !text-[10px]" title="A live run on Crustdata, recorded with every API response">
+                <span className="size-1.5 rounded-full bg-green" />Recorded live{run.recordedAt ? ` · ${new Date(run.recordedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
+              </span>
+            )}
+            {run.mock && <RunLive query={run.query} lens={run.lens} />}
           </div>
           <Segmented size="sm" layoutId="run-lens" options={LENSES} value={run.lens} onChange={run.setLens} />
           <ThemeToggle />
@@ -112,6 +121,7 @@ function Shell() {
             </div>
           )}
 
+          <RunBrief />
           {ready.length === 0 && (run.status === "done" ? <NothingFound /> : <Waiting />)}
 
           {SCENES.map((s) => {
@@ -134,6 +144,27 @@ function Shell() {
         </main>
       </div>
     </div>
+  );
+}
+
+function RunLive({ query, lens }: { query: string; lens: Lens }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(false);
+  return (
+    <button
+      onClick={async () => {
+        setBusy(true); setErr(false);
+        try {
+          const { run_id } = await startRun(query, lens, { live: true });
+          router.push(`/run/${run_id}?${new URLSearchParams({ q: query, lens })}`);
+        } catch { setErr(true); setBusy(false); }
+      }}
+      className="shrink-0 rounded-full bg-fg px-2.5 py-0.5 text-[11px] font-medium text-bg transition-opacity hover:opacity-80 disabled:opacity-40"
+      disabled={busy} title="Run this query again against Crustdata now"
+    >
+      {busy ? "Starting…" : err ? "Live engine offline" : "Run live ↻"}
+    </button>
   );
 }
 

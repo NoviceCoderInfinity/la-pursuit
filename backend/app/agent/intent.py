@@ -12,7 +12,9 @@ INVESTOR = re.compile(r"\b(invest|investing|investor|back(ing)?|due diligence|di
 OPERATOR = re.compile(r"\b(we are|we're|our company|i run|i work at|i'm at|i am at|our competitors|competitors of us|my company)\b", re.I)
 FOUNDER = re.compile(r"\b(i want to build|want to build|building a|build a|my idea|an idea|idea for|should i build|is there a market|startup idea|launch(ing)? a)\b", re.I)
 COMPANY_HINT = re.compile(r"\b((?i:we are|we're|invest in|back|about|analy[sz]e|competitors of|vs\.?|versus))\s+([A-Z][A-Za-z0-9&.\-]+(?:\s+[A-Z][A-Za-z0-9&.\-]+){0,2})")
-MARKET_WORDS = re.compile(r"\b(space|market|industry|sector|platforms?|companies|startups|landscape|players|tools?|agents?|vendors)\b", re.I)
+MARKET_WORDS = re.compile(r"\b(space|market|industry|sector|platforms?|companies|startups|landscape|players|tools?|agents?|vendors|"
+                          r"assistants?|copilots?|software|apps?|robots?|robotics|commerce|marketplaces?|providers?|solutions|"
+                          r"fintech|healthtech|edtech|saas)\b", re.I)
 
 SYSTEM = """You classify a one-sentence request for a market-intelligence agent.
 kind: "company" if the request centres on one named company; "idea" if the user describes something they want to build;
@@ -60,7 +62,7 @@ def _rules(q: str) -> Intent:
             seed, kind = m.group(2).strip(" .?!"), "company"
         elif domain or linkedin:
             kind, seed = "company", (domain or linkedin)
-        elif len(words) <= 3 and not MARKET_WORDS.search(text):
+        elif (len(words) <= 2 and not (len(words) == 2 and MARKET_WORDS.search(text))) or (len(words) == 3 and not MARKET_WORDS.search(text)):
             kind, seed = "company", text.strip(" .?!")  # resolve_seed decides whether it is real
     if seed and seed.lower() in {"ai", "the"}:
         seed, kind = None, "market"

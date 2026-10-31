@@ -189,7 +189,7 @@ export interface DeckScene {
     links: { label: string; url: string }[];
   }[];
   watches: { id: string; kind: "entity" | "discovery"; track: string; status: string; preview_sample?: object | null; entities?: number; resolved?: number; created_at?: string; ev?: EvId[] }[];
-  alerts: { ts: string; peer_id: number; engine: string; headline: string; ev: EvId[] }[];
+  alerts: { ts: string; peer_id: number; engine: string; headline: string; ev: EvId[]; url?: string | null }[];
   /** Extras owned by F7. */
   target_id?: number | null;
   diligence_questions?: string[];
@@ -210,10 +210,45 @@ export interface Scenes {
 export interface RunReport {
   run_id: string;
   query: string;
-  intent: { kind: "market" | "company" | "idea"; keywords: string[]; geo: string | null; lens: Lens };
+  created?: string;
+  lens?: Lens;
+  intent: { kind: "market" | "company" | "idea"; keywords: string[]; geo: string | null; lens: Lens; market_description?: string; segment?: string | null } | null;
   peers: Peer[];
   scenes: Partial<Scenes>;
   ledger: EvidenceEntry[];
   trace: TraceEvent[];
   credits_used: number;
+  /** Decision decks for every lens, so a recorded run can switch lens offline. */
+  decks?: Partial<Record<Lens, DeckScene>>;
+  summary?: RunSummary | null;
+  recorded?: { slug: string; run_id: string };
+  error?: string | null;
+}
+
+/** One card in the library of recorded live runs (fixtures/runs/index.json). */
+export interface RunSummary {
+  slug?: string;
+  query: string;
+  lens: Lens;
+  kind: "market" | "company" | "idea" | null;
+  market: string | null;
+  seed: string | null;
+  created: string;
+  peers: number;
+  people: number;
+  raised_usd: number;
+  jobs_90d: number;
+  moves: number;
+  investors: number;
+  claims_verified: number;
+  claims_contradicted: number;
+  disputes: number;
+  rejected: number;
+  calls: number;
+  evidence: number;
+  watches: number;
+  headline: string | null;
+  gtm_shifts: number;
+  top: { id: number; name: string; domain: string; logo: string | null; momentum: number | null }[];
+  error?: string | null;
 }

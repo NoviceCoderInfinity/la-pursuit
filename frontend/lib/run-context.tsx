@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { getReport, isMock, setLens as postLens, subscribe } from "./api";
+import { getReport, isRecorded, setLens as postLens, subscribe } from "./api";
 import type { EvId, Lens, Peer, SceneKey, Scenes, TraceEvent } from "./types";
 
 type Status = "running" | "done" | "error";
@@ -11,6 +11,7 @@ interface RunState {
   query: string;
   lens: Lens;
   mock: boolean;
+  recordedAt: string | null;
   status: Status;
   trace: TraceEvent[];
   peers: Peer[];
@@ -44,6 +45,7 @@ export function RunProvider({
   const [credits, setCredits] = useState(0);
   const [lens, setLensState] = useState<Lens>(initialLens ?? "founder");
   const [evidence, setEvidence] = useState<EvId[] | null>(null);
+  const [recordedAt, setRecordedAt] = useState<string | null>(null);
   const ctx = useRef({ query, lens: initialLens });
 
   useEffect(() => {
@@ -63,6 +65,7 @@ export function RunProvider({
         getReport(runId)
           .then((r) => {
             setPeers(r.peers);
+            if (isRecorded(runId) && r.created) setRecordedAt(r.created);
             setScenes((s) => ({ ...r.scenes, ...s }));
             setCredits(r.credits_used);
             const l = r.intent?.lens ?? (r as { lens?: Lens }).lens;
@@ -87,7 +90,7 @@ export function RunProvider({
   );
 
   const value: RunState = {
-    runId, query, lens, mock: isMock(runId), status, trace, peers,
+    runId, query, lens, mock: isRecorded(runId), recordedAt, status, trace, peers,
     peer: (id) => peerMap.get(id),
     scenes, credits, evidence,
     openEvidence: (ev) => ev && ev.length && setEvidence(ev),
@@ -95,6 +98,17 @@ export function RunProvider({
     setLens,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+/** Each persona sees only the scenes that answer its question, in the order it asks them. */
+export const PERSONA_SCENES: Record<Lens, SceneKey[]> = {
+  investor: ["field", "truth", "constellation", "chord", "deck"],
+  operator: ["field", "streams", "globe", "chord", "deck"],
+  founder: ["globe", "field", "constellation", "deck"],
+};
+
+export function scenesFor(lens: Lens): { key: SceneKey; n: string; name: string }[] {
+  return PERSONA_SCENES[lens].map((k, i) => ({ key: k, n: String(i + 1).padStart(2, "0"), name: SCENES.find((s) => s.key === k)!.name }));
 }
 
 export const SCENES: { key: SceneKey; n: string; name: string }[] = [

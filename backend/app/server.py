@@ -35,8 +35,21 @@ class LensIn(BaseModel):
 async def start_run(body: RunIn) -> dict[str, str]:
     run = Run(body.query.strip(), body.lens)
     RUNS[run.id] = run
-    TASKS[run.id] = asyncio.create_task(run.run())
+
+    async def go() -> None:
+        await run.run()
+        try:
+            run.save()
+        except Exception:  # noqa: BLE001
+            pass
+    TASKS[run.id] = asyncio.create_task(go())
     return {"run_id": run.id}
+
+
+def _saved(run_id: str) -> dict[str, Any] | None:
+    from app.config import settings
+    p = settings.runs_dir / f"{run_id}.json"
+    return json.loads(p.read_text()) if p.exists() else None
 
 
 def _get(run_id: str) -> Run:
@@ -48,6 +61,16 @@ def _get(run_id: str) -> Run:
 
 @app.get("/api/run/{run_id}/events")
 async def events(run_id: str):
+    if run_id not in RUNS:
+        saved = _saved(run_id)
+        if not saved:
+            raise HTTPException(404, "run not found")
+
+        async def replay():
+            for e in saved.get("trace", []):
+                yield {"data": json.dumps(e, ensure_ascii=True, default=str)}
+                await asyncio.sleep(0.02 if e.get("type") not in ("stage_start", "scene_ready") else 0.15)
+        return EventSourceResponse(replay(), ping=15)
     run = _get(run_id)
 
     async def gen():
@@ -61,11 +84,20 @@ async def events(run_id: str):
 
 @app.get("/api/run/{run_id}")
 async def report(run_id: str) -> dict[str, Any]:
+    if run_id not in RUNS:
+        saved = _saved(run_id)
+        if saved:
+            return saved
     return _get(run_id).report()
 
 
 @app.get("/api/run/{run_id}/evidence/{ev_id}")
 async def evidence(run_id: str, ev_id: str) -> dict[str, Any]:
+    if run_id not in RUNS:
+        saved = _saved(run_id)
+        hit = next((e for e in (saved or {}).get("ledger", []) if e.get("id") == ev_id), None)
+        if hit:
+            return {**hit, "credits": hit.get("credits") or 0, "path": hit.get("path") or ""}
     run = _get(run_id)
     e = run.ledger.get(ev_id)
     if not e:
@@ -80,9 +112,13 @@ async def evidence(run_id: str, ev_id: str) -> dict[str, Any]:
 
 @app.post("/api/run/{run_id}/lens")
 async def set_lens(run_id: str, body: LensIn) -> dict[str, Any]:
-    run = _get(run_id)
     if body.lens not in ("operator", "investor", "founder"):
         raise HTTPException(400, "bad lens")
+    if run_id not in RUNS:
+        deck = ((_saved(run_id) or {}).get("decks") or {}).get(body.lens)
+        if deck:
+            return deck
+    run = _get(run_id)
     run.lens_override = body.lens
     if not run.engines:
         raise HTTPException(409, "run not ready")

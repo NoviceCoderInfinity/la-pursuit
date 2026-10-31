@@ -1,6 +1,8 @@
 "use client";
 
 import * as d3 from "d3";
+import { ActionText } from "@/components/ActionText";
+import { chordAction } from "@/lib/actions";
 import { useMemo, useState } from "react";
 import { Num } from "@/components/Num";
 import { LegendItem, SceneFrame, Tooltip, useSize } from "@/components/ui";
@@ -12,6 +14,7 @@ type Hover = { kind: "group"; i: number } | { kind: "ribbon"; s: number; t: numb
 
 export function ChordSceneView({ data }: { data: ChordScene }) {
   const { peer, openEvidence, lens } = useRun();
+  const nameOf = (id: number) => peer(id)?.name ?? `#${id}`;
   const [box, { width }] = useSize<HTMLDivElement>();
   const [hover, setHover] = useState<Hover>(null);
   const size = Math.max(320, Math.min(width, 600));
@@ -56,7 +59,7 @@ export function ChordSceneView({ data }: { data: ChordScene }) {
 
   return (
     <SceneFrame
-      id="chord" n="04" name="Talent" title={title}
+      id="chord" n="04" name="Talent" title={title} action={<ActionText a={chordAction(data, lens, nameOf)} />}
       legend={
         <div className="flex flex-wrap items-center gap-4">
           <LegendItem color="#3b82f6" kind="line" label="In" />

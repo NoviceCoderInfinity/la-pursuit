@@ -4,12 +4,11 @@ import { motion } from "framer-motion";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { LibraryGrid, Personas, useLibrary } from "@/components/Library";
 import { LENSES, Logo, Segmented, ThemeToggle } from "@/components/ui";
-import { startRun } from "@/lib/api";
+import { OfflineError, startRun } from "@/lib/api";
 import { detectLens } from "@/lib/mock";
-import { SCENES } from "@/lib/run-context";
 import type { Lens } from "@/lib/types";
-import { cx } from "@/lib/format";
 
 const GlobeCanvas = dynamic(() => import("@/components/GlobeCanvas"), { ssr: false });
 
@@ -26,14 +25,26 @@ export default function Home() {
   const [q, setQ] = useState("");
   const [lens, setLens] = useState<LensPick>("auto");
   const [busy, setBusy] = useState(false);
+  const [offline, setOffline] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Lens | "all">("all");
+  const runs = useLibrary();
   const detected = q.trim() ? detectLens(q) : null;
 
   async function go(query = q, pick: LensPick = lens) {
     const text = query.trim();
     if (!text || busy) return;
     setBusy(true);
+    setOffline(null);
     const l = pick === "auto" ? undefined : pick;
-    const { run_id } = await startRun(text, l);
+    let run_id: string;
+    try {
+      ({ run_id } = await startRun(text, l));
+    } catch (e) {
+      setBusy(false);
+      setOffline(e instanceof OfflineError ? e.message : "Could not start the run.");
+      document.getElementById("library")?.scrollIntoView({ behavior: "smooth" });
+      return;
+    }
     const sp = new URLSearchParams({ q: text });
     if (l) sp.set("lens", l);
     router.push(`/run/${run_id}?${sp}`);
@@ -80,6 +91,7 @@ export default function Home() {
           </button>
         </motion.form>
 
+        {offline && <div className="mt-4 rounded-full bg-[color-mix(in_srgb,var(--red)_10%,transparent)] px-4 py-1.5 text-[13px] text-red">{offline}</div>}
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="mt-5 flex flex-col items-center gap-2">
           <Segmented
             layoutId="home-lens"
@@ -111,38 +123,20 @@ export default function Home() {
         <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[var(--bg)] to-transparent" />
       </div>
 
-      <section className="mx-auto max-w-[1100px] px-6 pb-24">
-        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[16px] border border-line bg-line sm:grid-cols-4 lg:grid-cols-7">
-          {SCENES.map((s, i) => (
-            <motion.div
-              key={s.key}
-              initial={{ opacity: 0, y: 8 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.05 }}
-              className={cx("flex aspect-square flex-col justify-between bg-bg p-4", i === 6 && "col-span-2 sm:col-span-1")}
-            >
-              <span className="font-dot text-[28px] font-black leading-none text-fg">{s.n}</span>
-              <SceneGlyph k={s.key} />
-              <span className="text-[13px] font-medium">{s.name}</span>
-            </motion.div>
-          ))}
+      <section className="mx-auto max-w-[1100px] px-6 pb-20">
+        <div className="eyebrow">Who it is for</div>
+        <h2 className="mt-2 text-[32px] font-semibold leading-[38px] tracking-[-0.02em]">Same market. Three different decisions.</h2>
+        <div className="mt-6">
+          <Personas runs={runs} onPick={(l) => { setFilter(l); document.getElementById("library")?.scrollIntoView({ behavior: "smooth" }); }} />
         </div>
       </section>
+
+      <section id="library" className="mx-auto max-w-[1100px] scroll-mt-8 px-6 pb-20">
+        <LibraryGrid runs={runs} filter={filter} setFilter={setFilter} />
+      </section>
+
     </main>
   );
 }
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
-
-function SceneGlyph({ k }: { k: string }) {
-  const c = "var(--muted)";
-  const a = "var(--accent)";
-  const g: Record<string, React.ReactNode> = {
-    globe: (<><circle cx="20" cy="20" r="15" fill="none" stroke={c} /><ellipse cx="20" cy="20" rx="6" ry="15" fill="none" stroke={c} /><path d="M8 26 Q20 6 32 14" fill="none" stroke={a} strokeWidth="1.5" /></>),
-    field: (<><circle cx="12" cy="26" r="3" fill={c} /><circle cx="20" cy="18" r="5" fill="none" stroke={c} /><circle cx="29" cy="10" r="4" fill={a} /><path d="M10 30 L18 21 L28 11" stroke={a} strokeDasharray="2 2" fill="none" /></>),
-    streams: (<><path d="M4 22 C12 14 20 26 36 16 L36 24 C20 34 12 22 4 28Z" fill={a} opacity=".9" /><path d="M4 16 C12 8 20 20 36 10 L36 16 C20 26 12 14 4 22Z" fill={c} opacity=".5" /></>),
-    chord: (<><circle cx="20" cy="20" r="15" fill="none" stroke={c} strokeWidth="2" strokeDasharray="12 3" /><path d="M9 12 Q20 20 30 26" fill="none" stroke={a} strokeWidth="2" /><path d="M10 28 Q20 20 28 9" fill="none" stroke={c} /></>),
-    constellation: (<><path d="M20 20 L8 10 M20 20 L33 13 M20 20 L12 32 M20 20 L30 30" stroke={c} /><circle cx="20" cy="20" r="4" fill={a} /><circle cx="8" cy="10" r="2.5" fill={c} /><circle cx="33" cy="13" r="2.5" fill={c} /><circle cx="12" cy="32" r="2.5" fill={c} /><circle cx="30" cy="30" r="2.5" fill="none" stroke={c} strokeDasharray="1.5 1.5" /></>),
-    truth: (<><rect x="7" y="6" width="26" height="28" rx="3" fill="none" stroke={c} /><path d="M12 14h16M12 20h10M12 26h13" stroke={c} /><circle cx="29" cy="26" r="5" fill="var(--bg)" stroke={a} strokeWidth="1.5" /><path d="M26.8 26l1.6 1.6 3-3" stroke={a} fill="none" strokeWidth="1.5" /></>),
-    deck: (<><rect x="6" y="12" width="20" height="22" rx="3" fill="none" stroke={c} /><rect x="14" y="6" width="20" height="22" rx="3" fill="var(--bg)" stroke={a} strokeWidth="1.5" /><path d="M19 14h10M19 19h6" stroke={a} /></>),
-  };
-  return <svg width="40" height="40" viewBox="0 0 40 40" className="self-center">{g[k]}</svg>;
-}

@@ -20,7 +20,10 @@ def tokens(s: str | None) -> set[str]:
 # Filler that market descriptions are full of but that says nothing about the market itself.
 FILLER = set("""business businesse let lets enable enable enabling help helps helping power powered powering ai-powered
 deploy deploying build builder interaction organization organisation team world leading one more across every
-provide provider offer offering create creating manage way easy simple fast faster better""".split())
+provide provider offer offering create creating manage way easy simple fast faster better
+mission magic bring back empower empowering best work works anything everything everyone all future reimagine reimagining
+platform solution solutions company companies product products software technology technologies service services
+customer customers enterprise enterprises modern next generation leading trusted loved""".split())
 
 
 def _stem(w: str) -> str:

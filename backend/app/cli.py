@@ -57,6 +57,33 @@ def run(query: str, lens: str = typer.Option(None), until: str = typer.Option(No
     asyncio.run(go())
 
 
+@cli.command("export")
+def export(run_ids: list[str], slugs: str = typer.Option(None, help="comma-separated slugs, same order as run ids")):
+    """Copy saved runs (backend/runs/<id>.json) into fixtures/runs/<slug>.json and rebuild index.json."""
+    import re
+    from app.config import REPO_DIR, settings
+    dest = REPO_DIR / "fixtures" / "runs"
+    dest.mkdir(parents=True, exist_ok=True)
+    names = slugs.split(",") if slugs else []
+    for i, rid in enumerate(run_ids):
+        src = settings.runs_dir / f"{rid}.json"
+        rep = json.loads(src.read_text())
+        slug = names[i] if i < len(names) else re.sub(r"[^a-z0-9]+", "-", rep["query"].lower()).strip("-")[:48]
+        rep["recorded"] = {"slug": slug, "run_id": rid}
+        (dest / f"{slug}.json").write_text(json.dumps(rep, ensure_ascii=False, default=str))
+        typer.echo(f"exported {rid} -> fixtures/runs/{slug}.json ({src.stat().st_size/1e6:.1f} MB)")
+    index = []
+    for f in sorted(dest.glob("*.json")):
+        if f.name == "index.json":
+            continue
+        rep = json.loads(f.read_text())
+        s = rep.get("summary") or {}
+        index.append({"slug": f.stem, **s, "query": rep["query"], "lens": rep.get("lens"), "created": rep.get("created")})
+    index.sort(key=lambda r: r.get("created") or "", reverse=True)
+    (dest / "index.json").write_text(json.dumps(index, ensure_ascii=False, default=str))
+    typer.echo(f"index: {len(index)} runs")
+
+
 def _usd(v):
     if not v: return "-"
     return f"${v/1e6:.0f}M" if v >= 1e6 else f"${v/1e3:.0f}K"

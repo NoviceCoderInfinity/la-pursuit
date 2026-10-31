@@ -1,4 +1,4 @@
-// Offline helpers. The offline run itself is the recorded fixtures/voice_ai.json (see lib/api.ts);
+// Offline helpers. Offline runs are the live recordings in fixtures/runs (see lib/api.ts);
 // there is deliberately no synthetic data generator, so nothing on screen is ever made up.
 import type { Lens } from "./types";
 

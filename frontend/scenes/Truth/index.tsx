@@ -1,6 +1,8 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { ActionText } from "@/components/ActionText";
+import { truthAction } from "@/lib/actions";
 import { useMemo, useState } from "react";
 import { Num } from "@/components/Num";
 import { SceneFrame } from "@/components/ui";
@@ -33,7 +35,7 @@ export function TruthSceneView({ data }: { data: TruthScene }) {
 
   return (
     <SceneFrame
-      id="truth" n="06" name="Truth" title={title}
+      id="truth" n="06" name="Truth" title={title} action={<ActionText a={truthAction(data, lens)} />}
       aside={<Ledger calls={calls} total={data.ledger_count} endpoints={data.endpoints ?? []} credits={data.credits_used} onOpen={openEvidence} />}
     >
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[16px] border border-line bg-line sm:grid-cols-4">

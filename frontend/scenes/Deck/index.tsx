@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import { getWatchStatus, type WatchStatus } from "@/lib/api";
+import { PeerLogo } from "@/components/Library";
 import { Num } from "@/components/Num";
 import { SceneFrame } from "@/components/ui";
 import { cx } from "@/lib/format";
@@ -117,14 +118,7 @@ export function DeckSceneView({ data }: { data: DeckScene }) {
             );
           })}
         </div>
-        <div className="mt-4">
-          <div className="eyebrow !text-[10px]">Alerts</div>
-          {data.alerts.length === 0 ? (
-            <div className="mt-2 text-[12px] text-muted">Listening.</div>
-          ) : data.alerts.map((a) => (
-            <div key={a.ts + a.headline} className="mt-2 flex items-baseline gap-3 text-[13px]"><span className="font-mono text-[11px] text-muted">{a.ts.slice(0, 10)}</span><span className="rounded-full bg-bg-2 px-2 text-[11px]">{a.engine}</span><Num value={a.headline} ev={a.ev} /></div>
-          ))}
-        </div>
+        <Signals alerts={data.alerts} />
       </div>
     </SceneFrame>
   );
@@ -141,6 +135,55 @@ function Gauge({ value, label }: { value: number; label: string }) {
       </svg>
       <div className="absolute text-center leading-none"><div className="font-dot text-[16px] font-black tnum">{value}</div></div>
       <div className="absolute -bottom-3 text-[9px] uppercase tracking-wider text-muted">{label}</div>
+    </div>
+  );
+}
+
+const ENGINE: Record<string, { label: string; color: string }> = {
+  capital: { label: "Funding", color: "var(--s1)" },
+  talent: { label: "Hire", color: "var(--s3)" },
+  gtm: { label: "GTM shift", color: "var(--s2)" },
+  expansion: { label: "Expansion", color: "var(--s4)" },
+  news: { label: "News", color: "var(--s5)" },
+};
+
+function Signals({ alerts }: { alerts: DeckScene["alerts"] }) {
+  const { peer } = useRun();
+  return (
+    <div className="mt-8">
+      <div className="flex items-end justify-between">
+        <div className="eyebrow">Latest signals · last 120 days</div>
+        <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
+          {Object.entries(ENGINE).map(([k, e]) => (
+            <span key={k} className="inline-flex items-center gap-1.5 text-[11px] text-muted"><span className="size-1.5 rounded-full" style={{ background: e.color }} />{e.label}</span>
+          ))}
+        </div>
+      </div>
+      {alerts.length === 0 ? (
+        <div className="mt-3 text-[13px] text-muted">Quiet market: no funding, senior hires, expansions or GTM shifts in the window.</div>
+      ) : (
+        <ol className="relative mt-4 border-l border-line pl-6">
+          {alerts.map((a, i) => {
+            const e = ENGINE[a.engine] ?? { label: a.engine, color: "var(--muted)" };
+            const p = peer(a.peer_id);
+            return (
+              <motion.li key={a.ts + a.headline} initial={{ opacity: 0, x: -6 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }} transition={{ delay: Math.min(i, 10) * 0.04 }}
+                className="relative pb-4 last:pb-0">
+                <span className="absolute -left-[29px] top-[5px] size-2.5 rounded-full border-2 border-bg" style={{ background: e.color }} />
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <span className="w-[74px] shrink-0 font-mono text-[11px] text-muted tnum">{new Date(a.ts).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" })}</span>
+                  <span className="rounded-full px-2 py-0.5 text-[10px] font-medium" style={{ background: `color-mix(in srgb, ${e.color} 14%, transparent)`, color: e.color }}>{e.label}</span>
+                  {p && <PeerLogo name={p.name} src={p.logo} size={18} />}
+                  <span className="min-w-0 flex-1 text-[14px] leading-[20px]">
+                    {a.url ? <a href={a.url} target="_blank" rel="noreferrer" className="hover:text-accent">{a.headline}</a> : a.headline}
+                  </span>
+                  {(a.ev?.length ?? 0) > 0 && <Num value="receipt" ev={a.ev} className="text-[11px] text-muted" />}
+                </div>
+              </motion.li>
+            );
+          })}
+        </ol>
+      )}
     </div>
   );
 }

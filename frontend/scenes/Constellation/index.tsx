@@ -1,6 +1,8 @@
 "use client";
 
 import * as d3 from "d3";
+import { ActionText } from "@/components/ActionText";
+import { capitalAction } from "@/lib/actions";
 import { useMemo, useState } from "react";
 import { Num } from "@/components/Num";
 import { LegendItem, SceneFrame, Tooltip, useSize } from "@/components/ui";
@@ -81,7 +83,7 @@ export function ConstellationSceneView({ data }: { data: ConstellationScene }) {
 
   return (
     <SceneFrame
-      id="constellation" n="05" name="Capital" title={title}
+      id="constellation" n="05" name="Capital" title={title} action={<ActionText a={capitalAction(data, lens)} />}
       legend={
         <div className="flex flex-wrap items-center gap-4">
           <LegendItem color="#3b82f6" label="Kingmaker" />

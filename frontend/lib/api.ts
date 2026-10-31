@@ -1,27 +1,39 @@
 // Client for the PRD §8 API. Falls back to a local run when the backend is unreachable, so every
 // screen works offline. Mock run ids start with "mock_". The fallback replays the recorded run in
-// fixtures/voice_ai.json (copied to public/ by `predev`/`prebuild`).
-import type { DeckScene, EvidenceEntry, Lens, RunReport, TraceEvent } from "./types";
+// fixtures/runs/*.json (live runs recorded with every API response; copied to public/ by `predev`/`prebuild`).
+import type { DeckScene, EvidenceEntry, Lens, RunReport, RunSummary, TraceEvent } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
-const FORCE_MOCK = process.env.NEXT_PUBLIC_MOCK === "1";
-const FIXTURE_URL = "/fixtures/voice_ai.json";
-const REPLAY_SPEED = 3; // recorded run plays 3× faster
-const REPLAY_MAX_GAP_MS = 700;
+const FORCE_OFFLINE = process.env.NEXT_PUBLIC_MOCK === "1";
+const LIBRARY_URL = "/fixtures/runs";
+const REPLAY_SPEED = 6; // recorded runs replay 6× faster than they ran
+const REPLAY_MAX_GAP_MS = 400;
 
-export const isMock = (runId: string) => runId.startsWith("mock_");
+/** Recorded live runs have ids "rec_<slug>"; legacy "mock_*" links map to the voice-agents recording. */
+export const isRecorded = (runId: string) => runId.startsWith("rec_") || runId.startsWith("mock_");
+export const isMock = isRecorded;
+const slugOf = (runId: string) => (runId.startsWith("rec_") ? runId.slice(4) : "ai-voice-agents");
 
-let fixture: Promise<RunReport | null> | null = null;
-const loadFixture = () =>
-  (fixture ??= fetch(FIXTURE_URL)
-    .then((r) => (r.ok ? (r.json() as Promise<RunReport>) : null))
-    .catch(() => null));
+const cache = new Map<string, Promise<RunReport | null>>();
+function loadRecorded(slug: string) {
+  if (!cache.has(slug)) {
+    cache.set(slug, fetch(`${LIBRARY_URL}/${slug}.json`).then((r) => (r.ok ? (r.json() as Promise<RunReport>) : null)).catch(() => null));
+  }
+  return cache.get(slug)!;
+}
 
-async function offline(): Promise<RunReport> {
-  const rec = await loadFixture();
-  if (!rec) throw new Error("No backend and no recorded run (fixtures/voice_ai.json) available");
+async function offline(runId: string): Promise<RunReport> {
+  const rec = await loadRecorded(slugOf(runId));
+  if (!rec) throw new Error("This recorded run is not available");
   return rec;
 }
+
+let library: Promise<RunSummary[]> | null = null;
+export function getLibrary(): Promise<RunSummary[]> {
+  return (library ??= fetch(`${LIBRARY_URL}/index.json`).then((r) => (r.ok ? (r.json() as Promise<RunSummary[]>) : [])).catch(() => []));
+}
+
+const norm = (q: string) => q.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 /** Recorded trace → replay schedule, keeping the real rhythm but compressed. */
 function replay(trace: TraceEvent[]) {
@@ -44,8 +56,13 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function startRun(query: string, lens?: Lens): Promise<{ run_id: string }> {
-  if (!FORCE_MOCK) {
+export class OfflineError extends Error {}
+
+export async function startRun(query: string, lens?: Lens, opts: { live?: boolean } = {}): Promise<{ run_id: string }> {
+  // A query we already ran live opens its recording instantly, unless the user asks for a fresh live run.
+  const hit = (await getLibrary()).find((r) => norm(r.query) === norm(query) && (!lens || r.lens === lens));
+  if (hit?.slug && !opts.live) return { run_id: `rec_${hit.slug}` };
+  if (!FORCE_OFFLINE) {
     try {
       const ctl = new AbortController();
       const timer = setTimeout(() => ctl.abort(), 4000);
@@ -55,10 +72,11 @@ export async function startRun(query: string, lens?: Lens): Promise<{ run_id: st
       clearTimeout(timer);
       return out;
     } catch {
-      /* backend down → sample run */
+      /* live engine unreachable */
     }
   }
-  return { run_id: "mock_voice_ai" };
+  if (hit?.slug) return { run_id: `rec_${hit.slug}` };
+  throw new OfflineError("The live engine is offline. Open one of the recorded runs below.");
 }
 
 export function subscribe(
@@ -69,7 +87,7 @@ export function subscribe(
   if (isMock(runId)) {
     let timers: ReturnType<typeof setTimeout>[] = [];
     let cancelled = false;
-    offline()
+    offline(runId)
       .then((report) => {
         if (cancelled) return;
         timers = replay(report.trace).map(({ delay, ev }) => setTimeout(() => onEvent(ev), delay));
@@ -99,19 +117,19 @@ export function subscribe(
 }
 
 export async function getReport(runId: string): Promise<RunReport> {
-  if (isMock(runId)) return offline();
+  if (isRecorded(runId)) return offline(runId);
   return json<RunReport>(`/api/run/${runId}`);
 }
 
 export async function getEvidence(runId: string, evId: string): Promise<EvidenceEntry | null> {
-  if (isMock(runId)) return (await offline()).ledger.find((e) => e.id === evId) ?? null;
+  if (isRecorded(runId)) return (await offline(runId)).ledger.find((e) => e.id === evId) ?? null;
   return json<EvidenceEntry>(`/api/run/${runId}/evidence/${evId}`);
 }
 
 export async function setLens(runId: string, lens: Lens): Promise<DeckScene> {
-  if (isMock(runId)) {
-    // A recording holds one lens's deck; re-ranking needs the backend.
-    return { ...((await offline()).scenes.deck as DeckScene), lens };
+  if (isRecorded(runId)) {
+    const rec = await offline(runId);
+    return rec.decks?.[lens] ?? { ...(rec.scenes.deck as DeckScene), lens };
   }
   return json<DeckScene>(`/api/run/${runId}/lens`, { method: "POST", body: JSON.stringify({ lens }) });
 }
@@ -122,7 +140,7 @@ export interface WatchStatus {
   ev?: string[];
 }
 export async function getWatchStatus(runId: string): Promise<WatchStatus[]> {
-  if (isMock(runId)) return [];
+  if (isRecorded(runId)) return [];
   return json<WatchStatus[]>(`/api/run/${runId}/watch`);
 }
 

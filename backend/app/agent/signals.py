@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -161,23 +162,41 @@ async def _talent(live: list[Peer], client: CrustClient, tracer: Tracer, out: di
     tracer.emit("note", f"{len(out['moves'])} cross-company moves among peers ({out['moves_total']} matching profiles)", ev=ev_ids[:3])
 
 
+AMBIGUOUS = set("""fin bland linear glean ramp harvey notion apple square block mercury scale figure cursor loom gusto
+deel brex plaid stripe swiggy zepto blinkit""".split())
+
+
 def _news(live: list[Peer], companies: dict[int, dict[str, Any]], tracer: Tracer, out: dict[str, Any]) -> None:
-    """News relevance (entity disambiguation); no network, the items came with enrich."""
+    """News relevance (entity disambiguation); no network, the items came with enrich.
+    A headline must name the company as a whole word. Short or common-word names ("Fin", "Linear", "Ramp")
+    must also be backed by the company's domain or a term from its own description."""
     for p in live:
         cd = companies[p.id]
         kept, rejected = [], []
         name_toks = {t for t in tokens(p.name) if t not in GENERIC} or {p.name.lower()}
-        desc_toks = tokens(cd.get("basic_info", {}).get("description"))
+        desc_toks = tokens(cd.get("basic_info", {}).get("description")) | {c.lower() for c in (cd.get("taxonomy") or {}).get("categories") or []}
+        desc_toks -= name_toks
+        root = (p.domain or "").split(".")[0].lower()
+        ambiguous = any(len(t) <= 3 or t in AMBIGUOUS for t in name_toks)
         for n in cd.get("news") or []:
             title = n.get("article_title") or ""
             tl = title.lower()
-            if not any(t in tl for t in name_toks):
-                rejected.append({"title": title, "reason": "headline does not mention the company"})
+            words = set(re.findall(r"[a-z0-9]+", tl))
+            if not any(t in words for t in name_toks):
+                rejected.append({"title": title, "reason": "headline does not name the company"})
                 continue
-            if re.search(r"\b(hotel|resort|restaurant|village|municipal|district|temple|weather|cricket|football|recipe)\b", tl) \
+            if re.search(r"\b(hotels?|resorts?|restaurants?|villages?|municipal|district|temples?|weather|cricket|football|recipes?|real estate|apartments?)\b", tl) \
                     and not (tokens(title) & desc_toks):
                 rejected.append({"title": title, "reason": "same name, different entity (headline is about a place or unrelated topic)"})
                 continue
+            if ambiguous:
+                url = (n.get("article_url") or "").lower()
+                backed = (p.domain and p.domain.lower() in tl) or (tokens(title) & desc_toks) or (root and len(root) > 4 and root in url)
+                # "Fin.com raises", "Corp Fin", "Fin Capital": the name next to another entity word is a different company
+                clash = re.search(rf"\b(corp|capital|ventures|bank|\w+\.com)\s*{re.escape(next(iter(name_toks)))}\b|\b{re.escape(next(iter(name_toks)))}(\.com|\s+capital|\s+ventures)\b", tl)
+                if not backed or clash:
+                    rejected.append({"title": title, "reason": f"“{p.name}” is a common word; headline gives no sign it is this company"})
+                    continue
             kept.append({"title": title, "url": n.get("article_url"), "date": n.get("article_publish_date"),
                          "publisher": n.get("article_publisher_name"), "confidence": n.get("confidence_score")})
         kept.sort(key=lambda x: x.get("date") or "", reverse=True)
@@ -242,7 +261,7 @@ async def _geo(live: list[Peer], companies: dict[int, dict[str, Any]], out: dict
                 geo["new_regions"].append({"label": label, "since": pts[0]["date"][:10], "count": pts[-1]["employee_count"]})
 
 
-HOMEPAGE_TIMEOUT_S = 40  # runs alongside jobs/talent/geo, which take ~30-40s anyway
+HOMEPAGE_TIMEOUT_S = int(os.getenv("VANTAGE_SITE_TIMEOUT", "40"))  # runs alongside jobs/talent/geo, which take ~30-40s anyway
 
 
 async def _homepage(peers: list[Peer], live: list[Peer], client: CrustClient, tracer: Tracer, out: dict[str, Any], seed_id: int | None) -> None:

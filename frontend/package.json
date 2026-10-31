@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "mkdir -p public/fixtures && (cp ../fixtures/voice_ai.json public/fixtures/ 2>/dev/null || true)",
+    "predev": "rm -rf public/fixtures && mkdir -p public/fixtures/runs && (cp ../fixtures/runs/*.json public/fixtures/runs/ 2>/dev/null || true)",
     "dev": "next dev",
-    "prebuild": "mkdir -p public/fixtures && (cp ../fixtures/voice_ai.json public/fixtures/ 2>/dev/null || true)",
+    "prebuild": "rm -rf public/fixtures && mkdir -p public/fixtures/runs && (cp ../fixtures/runs/*.json public/fixtures/runs/ 2>/dev/null || true)",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

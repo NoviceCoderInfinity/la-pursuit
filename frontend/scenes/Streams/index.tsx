@@ -1,6 +1,8 @@
 "use client";
 
 import * as d3 from "d3";
+import { ActionText } from "@/components/ActionText";
+import { streamsAction } from "@/lib/actions";
 import { useMemo, useState } from "react";
 import { Num } from "@/components/Num";
 import { LegendItem, SceneFrame, useSize } from "@/components/ui";
@@ -21,6 +23,7 @@ type PeerStream = StreamsScene["peers"][number];
 
 export function StreamsSceneView({ data }: { data: StreamsScene }) {
   const { peer, lens } = useRun();
+  const nameOf = (id: number) => peer(id)?.name ?? `#${id}`;
   const [hover, setHover] = useState<number | null>(null);
   const [onlyShifts, setOnlyShifts] = useState(false);
 
@@ -36,7 +39,7 @@ export function StreamsSceneView({ data }: { data: StreamsScene }) {
 
   return (
     <SceneFrame
-      id="streams" n="03" name="Build vs Sell" title={title}
+      id="streams" n="03" name="Build vs Sell" title={title} action={<ActionText a={streamsAction(data, lens, nameOf)} />}
       legend={
         <div className="flex max-w-[420px] flex-wrap items-center justify-end gap-x-4 gap-y-2">
           {FUNCTIONS.map((f) => <LegendItem key={f} color={COLOR[f]} label={f} />)}
@@ -66,7 +69,16 @@ export function StreamsSceneView({ data }: { data: StreamsScene }) {
   );
 }
 
-function Card({ p, name, hover, setHover }: { p: PeerStream; name: string; hover: number | null; setHover: (i: number | null) => void }) {
+/** The newest month of a function timeseries is often only partly counted; drop it when it falls off a cliff. */
+function trimPartial(p: PeerStream): PeerStream {
+  const tot = (r: PeerStream["series"][number]) => FUNCTIONS.reduce((a, f) => a + (r[f] ?? 0), 0);
+  const s = p.series;
+  if (s.length > 3 && tot(s[s.length - 1]) < 0.85 * tot(s[s.length - 2])) return { ...p, series: s.slice(0, -1) };
+  return p;
+}
+
+function Card({ p: raw, name, hover, setHover }: { p: PeerStream; name: string; hover: number | null; setHover: (i: number | null) => void }) {
+  const p = useMemo(() => trimPartial(raw), [raw]);
   const [ref, { width }] = useSize<HTMLDivElement>();
   const H = 120;
   const AD = 22;
