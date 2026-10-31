@@ -17,6 +17,25 @@ def tokens(s: str | None) -> set[str]:
     return {t for t in re.findall(r"[a-z0-9][a-z0-9\-]+", s.lower()) if t not in STOP and len(t) > 2}
 
 
+# Filler that market descriptions are full of but that says nothing about the market itself.
+FILLER = set("""business businesse let lets enable enable enabling help helps helping power powered powering ai-powered
+deploy deploying build builder interaction organization organisation team world leading one more across every
+provide provider offer offering create creating manage way easy simple fast faster better""".split())
+
+
+def _stem(w: str) -> str:
+    if len(w) > 4 and w.endswith("ies"):
+        return w[:-3] + "y"
+    if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+        return w[:-1]
+    return w
+
+
+def terms(s: str | None) -> set[str]:
+    """tokens() plus light stemming and filler removal, so "AI agents" matches "agent". Discovery only."""
+    return {t for t in (_stem(w) for w in tokens(s)) if t not in FILLER and t not in STOP}
+
+
 def overlap(a: str | None, b: str | None) -> float:
     ta, tb = tokens(a), tokens(b)
     if not ta or not tb:

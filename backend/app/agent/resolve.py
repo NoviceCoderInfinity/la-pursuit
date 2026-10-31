@@ -65,6 +65,16 @@ async def resolve_seed(intent: Intent, query: str, client: CrustClient, tracer: 
         scored.append((score, c, conf))
     scored.sort(key=lambda t: t[0], reverse=True)
     best = scored[0][1]
+    # Sanity: a same-named record whose domain doesn't carry the name and whose description shares
+    # nothing with the request ("Zzz" → troutman.com, a law firm) is not the company the user meant.
+    dom_root = re.sub(r"[^a-z0-9]", "", (best.domain or "").split(".")[0].lower())
+    name_in_domain = any(t in dom_root for t in core if len(t) >= 3)
+    ctx_best = overlap(" ".join(t for t in tokens(query) if t not in seed_toks), best.description)
+    if not name_in_domain and ctx_best == 0 and scored[0][2] < 0.95:
+        alts = ", ".join(f"{c.name} ({c.domain})" for _, c, _ in scored[:3])
+        tracer.decide("reject", best.name, f"closest graph records don't look like “{seed_name}”: {alts}", ev=[ev])
+        tracer.done("resolve", f"Could not resolve “{seed_name}” on the identity graph")
+        return None
     best.status, best.reason = "accepted", f"best match (confidence {scored[0][2]:.2f}, score {scored[0][0]:.2f})"
     if len(scored) > 1:
         alts = ", ".join(f"{c.name} ({c.domain})" for _, c, _ in scored[1:4])
