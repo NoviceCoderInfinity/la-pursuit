@@ -1,0 +1,14 @@
+api.key
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+.next/
+dist/
+.cache/
+*.log
+.DS_Store
+backend/.cache/
