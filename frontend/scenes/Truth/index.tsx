@@ -23,8 +23,10 @@ export function TruthSceneView({ data }: { data: TruthScene }) {
   const high = data.disputes.filter((d) => (d as { severity?: string }).severity !== "low");
 
   const title =
-    lens === "investor" && data.claims.length
+    lens === "investor" && data.claims.length && (verified || contradicted)
       ? <>Their claims, checked against the graph: <span className="text-green">{verified} hold</span>{contradicted ? <>, <span className="text-red">{contradicted} don’t</span></> : ""}.</>
+      : lens === "investor" && data.claims.length
+        ? <>{data.claims.length} claim{data.claims.length > 1 ? "s" : ""} on their site, none the graph can check.</>
       : high.length
         ? <>The data disagreed <Num value={high.length} ev={high[0]?.values[0]?.ev ? [high[0].values[0].ev] : undefined} /> times. Here is how it was settled.</>
         : <>Every number here has a receipt.</>;
