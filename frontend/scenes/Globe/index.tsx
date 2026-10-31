@@ -112,7 +112,7 @@ export function GlobeSceneView({ data }: { data: GlobeScene }) {
 
   return (
     <SceneFrame
-      id="globe" n="01" name="Atlas" title={title} action={<ActionText a={globeAction(data, lens, nameOf)} />}
+      id="globe" n="01" name="Atlas" title={title} action={((a) => (a ? <ActionText a={a} /> : undefined))(globeAction(data, lens, nameOf))}
       legend={
         <div className="flex flex-wrap items-center gap-4">
           <LegendItem color={accent} label="People" />

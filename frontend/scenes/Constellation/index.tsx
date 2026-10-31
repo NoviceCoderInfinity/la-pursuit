@@ -83,7 +83,7 @@ export function ConstellationSceneView({ data }: { data: ConstellationScene }) {
 
   return (
     <SceneFrame
-      id="constellation" n="05" name="Capital" title={title} action={<ActionText a={capitalAction(data, lens)} />}
+      id="constellation" n="05" name="Capital" title={title} action={((a) => (a ? <ActionText a={a} /> : undefined))(capitalAction(data, lens))}
       legend={
         <div className="flex flex-wrap items-center gap-4">
           <LegendItem color="#3b82f6" label="Kingmaker" />

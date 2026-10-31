@@ -52,7 +52,7 @@ export function FieldSceneView({ data }: { data: FieldScene }) {
 
   return (
     <SceneFrame
-      id="field" n="02" name="Momentum" title={title} action={<ActionText a={fieldAction(data, lens, nameOf, scenes.deck?.target_id ?? null)} />}
+      id="field" n="02" name="Momentum" title={title} action={((a) => (a ? <ActionText a={a} /> : undefined))(fieldAction(data, lens, nameOf, scenes.deck?.target_id ?? null))}
       legend={
         <div className="flex max-w-[520px] flex-wrap items-center justify-end gap-x-4 gap-y-2 text-fg-2">
           <LegendItem color="var(--accent)" label="High momentum" />

@@ -1,0 +1,73 @@
+{
+ "cards": [
+  [
+   "c01",
+   "",
+   "Every market decision<br>starts with a question."
+  ],
+  [
+   "c02",
+   "",
+   "Who is winning?<br>Who is coming for us?<br>Is there room for me?"
+  ],
+  [
+   "c03",
+   "",
+   "The answers are buried across<br>companies, people, jobs and money."
+  ],
+  [
+   "c04",
+   "VANTAGE",
+   "Ask about any market.<br>Get the decision, with receipts."
+  ],
+  [
+   "q1",
+   "INVESTOR",
+   "Is Harvey AI worth backing<br>against Legora?"
+  ],
+  [
+   "q2",
+   "OPERATOR",
+   "We are Linear.<br>Who is coming after our customers?"
+  ],
+  [
+   "q3",
+   "FOUNDER",
+   "Is there room for a new<br>AI note-taker for doctors in the US?"
+  ],
+  [
+   "e01",
+   "LIVE ON CRUSTDATA",
+   "Companies. People. Jobs. Funding.<br>Every number, cited."
+  ],
+  [
+   "e02",
+   "VANTAGE",
+   "Decisions, with receipts."
+  ]
+ ],
+ "captions": {
+  "home-hero": "One question in.",
+  "home-personas": "Answered for your seat: investor, operator, founder.",
+  "harvey-trace": "An agent maps the market live. Every call is logged.",
+  "harvey-brief": "The answer comes first.",
+  "harvey-field": "Momentum against 15 legal-AI peers.",
+  "harvey-truth": "Their own claims, checked against the graph.",
+  "harvey-evidence": "Every number opens its source.",
+  "harvey-constellation": "Who backs this market.",
+  "harvey-deck": "Head-to-head, with a verdict.",
+  "linear-brief": "Who is coming after you, ranked.",
+  "linear-field": "Who is accelerating, and who is stalling.",
+  "linear-streams": "Who switched from building to selling.",
+  "linear-globe": "Where rivals are hiring.",
+  "linear-chord": "Where talent is moving.",
+  "scribe-brief": "How crowded. Who is winning. Where to wedge in.",
+  "scribe-globe": "Where the market is, and isn't.",
+  "scribe-constellation": "Which investors to pitch first.",
+  "scribe-deck2": "And it keeps watching: live signals, live watches.",
+  "harvey-chord": "Who keeps their people.",
+  "linear-trace": "Every candidate, accepted or rejected, with a reason.",
+  "linear-deck": "Moves you can act on today.",
+  "scribe-deck": "A verdict: crowdedness, leaders, and the wedge."
+ }
+}

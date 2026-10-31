@@ -15,3 +15,8 @@ backend/.cache/
 
 # raw run reports (curated ones are exported to fixtures/runs)
 backend/runs/
+
+# heavy, regenerable video media (see video/video.md)
+video/src/rec/
+video/src/music.wav
+video/src/Vantage-demo-stills.mp4

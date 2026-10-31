@@ -39,7 +39,7 @@ export function StreamsSceneView({ data }: { data: StreamsScene }) {
 
   return (
     <SceneFrame
-      id="streams" n="03" name="Build vs Sell" title={title} action={<ActionText a={streamsAction(data, lens, nameOf)} />}
+      id="streams" n="03" name="Build vs Sell" title={title} action={((a) => (a ? <ActionText a={a} /> : undefined))(streamsAction(data, lens, nameOf))}
       legend={
         <div className="flex max-w-[420px] flex-wrap items-center justify-end gap-x-4 gap-y-2">
           {FUNCTIONS.map((f) => <LegendItem key={f} color={COLOR[f]} label={f} />)}

@@ -59,7 +59,7 @@ export function ChordSceneView({ data }: { data: ChordScene }) {
 
   return (
     <SceneFrame
-      id="chord" n="04" name="Talent" title={title} action={<ActionText a={chordAction(data, lens, nameOf)} />}
+      id="chord" n="04" name="Talent" title={title} action={((a) => (a ? <ActionText a={a} /> : undefined))(chordAction(data, lens, nameOf))}
       legend={
         <div className="flex flex-wrap items-center gap-4">
           <LegendItem color="#3b82f6" kind="line" label="In" />

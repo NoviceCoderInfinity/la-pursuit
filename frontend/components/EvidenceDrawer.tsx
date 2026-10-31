@@ -74,7 +74,7 @@ export function EvidenceDrawer() {
                   <div>
                     <div className="font-mono text-[12px] text-muted">{e.id}</div>
                     <div className="mt-2 break-words text-[32px] font-semibold leading-[38px] tracking-tight tnum">
-                      {typeof e.value === "object" ? JSON.stringify(e.value) : String(e.value)}
+                      {e.value == null ? <span className="text-[22px] text-fg-2">Full {e.endpoint} response</span> : typeof e.value === "object" ? JSON.stringify(e.value) : String(e.value)}
                     </div>
                     {e.path && <div className="mt-2 break-all font-mono text-[12px] text-fg-2">{e.path}</div>}
                   </div>

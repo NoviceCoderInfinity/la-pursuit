@@ -7,10 +7,13 @@ import { PeerLogo } from "@/components/Library";
 import { Num } from "@/components/Num";
 import { SceneFrame } from "@/components/ui";
 import { cx } from "@/lib/format";
-import { useRun } from "@/lib/run-context";
+import { scenesFor, useRun } from "@/lib/run-context";
 import type { DeckScene } from "@/lib/types";
 
-const SCENE_NAME: Record<string, string> = { globe: "01 Atlas", field: "02 Momentum", streams: "03 Build vs Sell", chord: "04 Talent", constellation: "05 Capital" };
+const sceneLabel = (lens: string, key: string) => {
+  const s = scenesFor(lens as Parameters<typeof scenesFor>[0]).find((x) => x.key === key);
+  return s ? `${s.n} ${s.name}` : null;
+};
 const LENS_WORD: Record<string, string> = { operator: "operator", investor: "investor", founder: "founder" };
 
 export function DeckSceneView({ data }: { data: DeckScene }) {
@@ -46,7 +49,7 @@ export function DeckSceneView({ data }: { data: DeckScene }) {
             className="group relative flex flex-col rounded-[18px] border border-line bg-bg p-6 transition-colors hover:border-line-2">
             <div className="flex items-center justify-between">
               <span className="font-dot text-[22px] font-black leading-none text-accent">0{i + 1}</span>
-              <a href={`#${m.scene}`} className="rounded-full bg-bg-2 px-2.5 py-1 font-mono text-[10px] text-muted transition-colors hover:text-fg">{SCENE_NAME[m.scene] ?? m.scene} ↗</a>
+              <a href={`#${m.scene}`} className="rounded-full bg-bg-2 px-2.5 py-1 font-mono text-[10px] text-muted transition-colors hover:text-fg">{sceneLabel(lens, m.scene) ?? m.scene} ↗</a>
             </div>
             <h3 className="mt-5 text-[22px] font-semibold leading-[28px] tracking-[-0.02em]">{m.title}</h3>
             <p className="mt-3 flex-1 text-[14px] leading-[21px] text-fg-2">{m.why}</p>

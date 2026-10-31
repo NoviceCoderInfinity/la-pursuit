@@ -1,5 +1,7 @@
 # Vantage
 
+**Live:** [vantagemarket.vercel.app](https://vantagemarket.vercel.app) · **Demo video:** [youtu.be/W0FskB-NIDw](https://youtu.be/W0FskB-NIDw)
+
 Vantage is an autonomous market-intelligence agent built on Crustdata's API. You ask one question about a company, a market or an idea. It resolves the companies, finds and qualifies the peer set, enriches every peer, and returns an answer shaped for your persona. Every number on screen is clickable and opens the exact Crustdata response that produced it. It uses no LLM key: intent, qualification and every judgment are rule-based.
 
 ## Who it's for

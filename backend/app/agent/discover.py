@@ -23,7 +23,7 @@ SERVICES_NAME = re.compile(r"\b(solutions|infosolutions|infotech|infosystems|ser
                            r"ltd|limited|llp|global)\b", re.I)
 INVESTOR_FIRM = re.compile(r"\b(venture capital|venture firm|vc firm|investment firm|we invest|invests in|early[- ]stage investor|"
                            r"seed fund|growth equity|private equity|angel network|fund i{1,3}\b|limited partners)\b", re.I)
-LAW_FIRM = re.compile(r"\b(llp|law firm|solicitors|attorneys at law|barristers|chartered accountants|cpa firm)\b", re.I)
+LAW_FIRM = re.compile(r"\b(llp|law firms?|full-service law|solicitors|attorneys at law|barristers|chartered accountants|cpa firms?)\b", re.I)
 AGG_DOMAINS = ("linkedin.com", "crunchbase.com", "g2.com", "capterra.com", "producthunt.com", "wikipedia.org",
                "medium.com", "reddit.com", "youtube.com", "github.com", "techcrunch.com", "forbes.com", "google.com")
 
@@ -313,7 +313,8 @@ class Discovery:
         if self.segment_concept and not (self.segment_concept & doc) and c.source != "competitors":
             return False, f"not built for {self.intent.segment}", 0
         corroborated = c.source in ("competitors", "web")
-        need = 1 if corroborated else min(2, len(self.core - self.geo))
+        n_concepts = len(self.concepts) if self.concepts else len(self.core - self.geo)
+        need = 1 if corroborated else min(2, n_concepts)
         if len(core_hit) < need and rel < 0.35:
             return False, f"description does not match the market (core terms {len(core_hit)} of {need} needed: {', '.join(sorted(self.core))})", 0
         # Named by the web or the graph as a competitor is the strongest evidence we have; identify gives
