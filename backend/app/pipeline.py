@@ -127,6 +127,9 @@ class Run:
         return {
             "query": self.query, "lens": self.lens, "kind": self.intent.kind if self.intent else None,
             "market": self.intent.market_description if self.intent else None,
+            "geo": self.intent.geo if self.intent else None,
+            "segment": self.intent.segment if self.intent else None,
+            "compare": self.intent.compare_with if self.intent else [],
             "seed": self.seed.name if self.seed else None,
             "created": self.created, "peers": len(self.peers),
             "people": sum(p.headcount or 0 for p in self.peers),

@@ -233,6 +233,9 @@ export interface RunSummary {
   kind: "market" | "company" | "idea" | null;
   market: string | null;
   seed: string | null;
+  geo?: string | null;
+  segment?: string | null;
+  compare?: string[];
   created: string;
   peers: number;
   people: number;

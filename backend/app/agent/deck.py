@@ -36,7 +36,28 @@ def _people_links(run: "Run", pid: int, limit: int = 3) -> list[dict[str, str]]:
     return out
 
 
+FOCUS_LEADS = {
+    "talent": ("Poaching", "Recruit"), "gtm": ("Hiring sales", "Brace"), "expansion": ("Defend",), "capital": ("Pitch", "Syndicate"),
+    "distress": ("Wedge",), "crowded": ("Market is",), "threat": ("Threat",), "momentum": ("Strong", "Dig deeper", "Pass", "Threat", "Incumbent"),
+}
+
+
+def _lead_with_focus(deck: dict[str, Any], focus: str | None) -> dict[str, Any]:
+    """Put the move that answers the user's actual question first."""
+    keys = FOCUS_LEADS.get(focus or "")
+    if keys:
+        deck["moves"] = sorted(deck["moves"], key=lambda m: 0 if m["title"].startswith(keys) else 1)
+    deck["focus"] = focus
+    deck["moves"] = deck["moves"][:3]
+    return deck
+
+
 def build_deck(run: "Run", lens: str) -> dict[str, Any]:
+    deck = _build_deck(run, lens)
+    return _lead_with_focus(deck, run.intent.focus if run.intent else None)
+
+
+def _build_deck(run: "Run", lens: str) -> dict[str, Any]:
     per, talent, cap = run.engines["per_peer"], run.engines["talent"], run.engines["capital"]
     pidx = {p.id: p for p in run.peers}
     ranked = sorted((p for p in run.peers if p.id in per and per[p.id]["momentum"] is not None), key=lambda p: -per[p.id]["momentum"])
@@ -64,7 +85,9 @@ def build_deck(run: "Run", lens: str) -> dict[str, Any]:
            f"last round {m['last_round'] or 'n/a'} {m['last_round_date'] or ''}); {pull_txt}; distress {m['distress'] or 0:.0f}/100.",
            0.8 if rank else 0.5, [m.get("ev")] + target.ev, "field", _people_links(run, target.id))
         if ranked:
-            rival = next((p for p in ranked if p.id != target.id), None)
+            named = {n.lower() for n in (run.intent.compare_with if run.intent else [])}
+            rival = next((p for p in ranked if p.id != target.id and p.name.lower() in named), None) \
+                or next((p for p in ranked if p.id != target.id), None)
             if rival:
                 rm = per[rival.id]
                 mv(f"Price the competition: {rival.name} is the fastest-moving peer",
@@ -82,7 +105,7 @@ def build_deck(run: "Run", lens: str) -> dict[str, Any]:
              "How much of monthly traffic is paid versus earned, and at what CAC?",
              "Who are the senior hires from the last six months and why did they join?",
              "Which peer would you least like to see raise next, and why?"]
-        return {"lens": lens, "target_id": target.id, "moves": moves[:3], "diligence_questions": q, "watches": [], "alerts": recent_signals(run)}
+        return {"lens": lens, "target_id": target.id, "moves": moves, "diligence_questions": q, "watches": [], "alerts": recent_signals(run)}
 
     if lens == "operator":
         me = seed or (ranked[0] if ranked else None)
@@ -107,6 +130,34 @@ def build_deck(run: "Run", lens: str) -> dict[str, Any]:
             mv(f"Defend {nr['label']}: {p.name} started hiring there in {nr['since'][:7]}",
                f"{p.name} now has {nr['count']} people in {nr['label']} (new since {nr['since']}). " +
                (f"{len(exp)} new-region moves detected across rivals." if len(exp) > 1 else ""), 0.65, p.ev[:1], "globe")
+        if me:
+            took: dict[int, list[str]] = {}
+            for mvx in run.signals.get("moves", []):
+                if mvx["from"] == me.id and mvx["to"] != me.id:
+                    took.setdefault(mvx["to"], []).append(mvx.get("title") or "")
+            if took:
+                pid, titles = max(took.items(), key=lambda kv: len(kv[1]))
+                p = pidx.get(pid)
+                if p:
+                    roles = ", ".join(t for t in titles[:3] if t)
+                    mv(f"Poaching: {p.name} hired {len(titles)} of your people",
+                       f"{len(titles)} people left {me.name} for {p.name}" + (f", including {roles}" if roles else "") +
+                       f". {sum(len(v) for v in took.values())} left for peers in total.",
+                       0.75, run.signals.get("moves_ev", [])[:2] + p.ev[:1], "chord", _people_links(run, p.id, 2))
+        sales = []
+        for p in run.peers:
+            if me and p.id == me.id:
+                continue
+            cats = (run.signals.get("jobs", {}).get(p.id) or {}).get("by_category") or {}
+            n = sum(v for k, v in cats.items() if __import__("re").search(r"sales|revenue|go-to-market|gtm|account|customer success|post sales|growth|partnerships|business development", k, __import__("re").I))
+            if n:
+                sales.append((n, p))
+        if sales:
+            n, p = max(sales, key=lambda t: t[0])
+            mv(f"Hiring sales fastest: {p.name} added {n} go-to-market roles in 90 days",
+               f"{p.name} is building a sales machine{' and has shifted to selling' if (per.get(p.id, {}).get('gtm') or {}).get('detected') else ''}. "
+               f"Next: {', '.join(f'{q.name} ({k})' for k, q in sorted(sales, key=lambda t: -t[0])[1:3])}.",
+               0.7, [(run.signals.get("jobs", {}).get(p.id) or {}).get("ev")] + p.ev[:1], "streams")
         leak = [r for r in talent["peers"] if r["net_flow"] < 0 and (not me or r["peer_id"] != me.id)]
         if leak:
             r = sorted(leak, key=lambda x: x["net_flow"])[0]
@@ -115,7 +166,7 @@ def build_deck(run: "Run", lens: str) -> dict[str, Any]:
             mv(f"Recruit from {p.name}: net talent loser in this market",
                f"{r['outflow']} people left {p.name} for peers vs {r['inflow']} joined{sent}. Senior hires there are reachable.",
                0.6, run.signals.get("moves_ev", [])[:1] + p.ev[:1], "chord", _people_links(run, p.id, 2))
-        return {"lens": lens, "target_id": me.id if me else None, "moves": moves[:3], "watches": [], "alerts": recent_signals(run)}
+        return {"lens": lens, "target_id": me.id if me else None, "moves": moves, "watches": [], "alerts": recent_signals(run)}
 
     # founder lens
     n = len(run.peers)
@@ -144,7 +195,7 @@ def build_deck(run: "Run", lens: str) -> dict[str, Any]:
         mv(f"Incumbent to avoid head-on: {top.name}",
            f"Momentum {per[top.id]['momentum']:.0f}/100, {top.headcount or '?'} people, {_fmt_usd(top.raised_usd)} raised. Position around it, not against it.",
            0.6, [per[top.id].get("ev")] + top.ev, "field", _people_links(run, top.id, 2))
-    return {"lens": lens, "target_id": None, "moves": moves[:3], "watches": [], "alerts": recent_signals(run),
+    return {"lens": lens, "target_id": None, "moves": moves, "watches": [], "alerts": recent_signals(run),
             "market_stage": stage, "crowdedness": crowd}
 
 

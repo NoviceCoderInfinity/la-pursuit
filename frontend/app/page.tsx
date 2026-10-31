@@ -13,9 +13,9 @@ import type { Lens } from "@/lib/types";
 const GlobeCanvas = dynamic(() => import("@/components/GlobeCanvas"), { ssr: false });
 
 const EXAMPLES: { q: string; lens: Lens }[] = [
-  { q: "We are Retell", lens: "operator" },
-  { q: "Should I invest in Bland AI", lens: "investor" },
-  { q: "AI receptionist for dental clinics in India", lens: "founder" },
+  { q: "We are Retell. Who is poaching our people?", lens: "operator" },
+  { q: "Should I invest in Bland AI, or is Retell pulling ahead?", lens: "investor" },
+  { q: "Is there room for a new AI note-taker for doctors in the US?", lens: "founder" },
 ];
 
 type LensPick = Lens | "auto";
@@ -78,7 +78,7 @@ export default function Home() {
         >
           <input
             autoFocus value={q} onChange={(e) => setQ(e.target.value)}
-            placeholder="A company, a market, or an idea"
+            placeholder="Ask about a company, a market, or an idea"
             className="h-12 min-w-0 flex-1 bg-transparent text-[17px] outline-none placeholder:text-muted"
           />
           <button

@@ -21,7 +21,7 @@ def tokens(s: str | None) -> set[str]:
 FILLER = set("""business businesse let lets enable enable enabling help helps helping power powered powering ai-powered
 deploy deploying build builder interaction organization organisation team world leading one more across every
 provide provider offer offering create creating manage way easy simple fast faster better
-mission magic bring back empower empowering best work works anything everything everyone all future reimagine reimagining
+vertical horizontal new next-gen nextgen mission magic bring back empower empowering best work works anything everything everyone all future reimagine reimagining
 platform solution solutions company companies product products software technology technologies service services
 customer customers enterprise enterprises modern next generation leading trusted loved""".split())
 
@@ -58,7 +58,7 @@ def domain_of(s: str) -> str | None:
 
 
 def find_domain(text: str) -> str | None:
-    m = re.search(r"\b([a-z0-9-]+\.(?:ai|com|io|co|app|dev|tech|net|org|in|xyz|cloud))\b", text.lower())
+    m = re.search(r"\b([a-z0-9-]+\.(?:ai|com|io|co|app|dev|tech|net|org|in|xyz|cloud|so|ly|me|gg|sh|us|uk|de|fr|health|finance|inc))\b", text.lower())
     return m.group(1) if m else None
 
 

@@ -18,6 +18,8 @@ class Intent(BaseModel):
     keywords: list[str] = Field(default_factory=list, description="3-8 search keywords for the market")
     geo: str | None = Field(default=None, description="Country or region if the input restricts geography")
     segment: str | None = Field(default=None, description="Target customer segment named in an idea ('for dental clinics')")
+    compare_with: list[str] = Field(default_factory=list, description="Other companies named for a head-to-head ('X or Y', 'X vs Y')")
+    focus: str | None = Field(default=None, description="What the question is worried about: talent, gtm, expansion, capital, distress, crowded, threat, momentum")
     lens: Lens
     rationale: str = Field(description="One short sentence on why this kind and lens")
 

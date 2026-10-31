@@ -9,17 +9,17 @@ import type { Lens, RunSummary } from "@/lib/types";
 
 export const PERSONAS: { key: Lens; title: string; ask: string; gets: string[]; scenes: string }[] = [
   {
-    key: "operator", title: "Operator", ask: "“We are Retell. Who is coming for us?”",
+    key: "operator", title: "Operator", ask: "“We are Retell. Who is poaching our people?”",
     gets: ["Which rival is accelerating fastest", "Who just switched from building to selling", "Where rivals are hiring, and whose people you can recruit"],
     scenes: "Momentum · Build vs Sell · Atlas · Talent · Decisions",
   },
   {
-    key: "investor", title: "Investor", ask: "“Should I invest in Bland AI?”",
+    key: "investor", title: "Investor", ask: "“Should I invest in Bland AI, or is Retell pulling ahead?”",
     gets: ["Its momentum rank against every peer", "Its own claims checked against the graph", "Who already backs the space, and what to ask on the call"],
     scenes: "Momentum · Truth · Capital · Talent · Decisions",
   },
   {
-    key: "founder", title: "Founder", ask: "“AI receptionist for dental clinics in India.”",
+    key: "founder", title: "Founder", ask: "“Is there room for a new AI note-taker for doctors in the US?”",
     gets: ["How crowded the market is, and its stage", "Investors with a bet here and room for one more", "Weakening incumbents whose customers you can take"],
     scenes: "Atlas · Momentum · Capital · Decisions",
   },
@@ -102,14 +102,24 @@ export function LibraryGrid({ runs, filter, setFilter }: { runs: RunSummary[] | 
   );
 }
 
+function caseTag(r: RunSummary): string {
+  if (r.compare?.length) return "Head-to-head";
+  if (r.kind === "idea") return r.segment ? `Idea · for ${r.segment}` : "Idea";
+  if (r.kind === "company") return "Company";
+  return r.geo ? `Market · ${r.geo}` : r.segment ? `Market · for ${r.segment}` : "Market";
+}
+
 function RunCard({ r, i }: { r: RunSummary; i: number }) {
   const sp = new URLSearchParams({ q: r.query, lens: r.lens });
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i, 8) * 0.04 }}>
       <Link href={`/run/rec_${r.slug}?${sp}`}
         className="group flex h-full flex-col rounded-[18px] border border-line bg-bg p-5 transition-all hover:-translate-y-0.5 hover:border-line-2 hover:shadow-[0_12px_40px_rgba(0,0,0,0.08)]">
-        <div className="flex items-center justify-between">
-          <span className="eyebrow !text-[10px] !text-accent">{r.lens}</span>
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="eyebrow shrink-0 !text-[10px] !text-accent">{r.lens}</span>
+            <span className="truncate rounded-full bg-bg-2 px-2 py-0.5 text-[10px] text-fg-2">{caseTag(r)}</span>
+          </span>
           <span className="font-mono text-[10px] text-muted">{new Date(r.created).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
         </div>
         <div className="mt-3 text-[17px] font-semibold leading-[23px] tracking-tight group-hover:text-accent">{r.query}</div>

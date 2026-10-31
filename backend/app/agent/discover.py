@@ -11,6 +11,7 @@ from app.config import settings
 from app.crust.client import CrustClient, CrustError
 from app.crust.fields import SEARCH_FIELDS
 from app.models import Candidate, Intent
+from app.geocode import COUNTRY_CENTROID
 from app.textutil import find_domain, terms, tokens
 from app.trace import Tracer
 
@@ -20,6 +21,8 @@ SERVICES = re.compile(r"\b(agency|agencies|consultanc(y|ies)|consulting|freelanc
                       r"custom ai|development company|for (?:our )?clients|delivered \d+\+? (?:projects|solutions))\b", re.I)
 SERVICES_NAME = re.compile(r"\b(solutions|infosolutions|infotech|infosystems|services|pvt|technologies llc|softwares?|"
                            r"ltd|limited|llp|global)\b", re.I)
+INVESTOR_FIRM = re.compile(r"\b(venture capital|venture firm|vc firm|investment firm|we invest|invests in|early[- ]stage investor|"
+                           r"seed fund|growth equity|private equity|angel network|fund i{1,3}\b|limited partners)\b", re.I)
 LAW_FIRM = re.compile(r"\b(llp|law firm|solicitors|attorneys at law|barristers|chartered accountants|cpa firm)\b", re.I)
 AGG_DOMAINS = ("linkedin.com", "crunchbase.com", "g2.com", "capterra.com", "producthunt.com", "wikipedia.org",
                "medium.com", "reddit.com", "youtube.com", "github.com", "techcrunch.com", "forbes.com", "google.com")
@@ -243,7 +246,11 @@ class Discovery:
         mode = "hybrid" if round_no < 3 else "semantic"
         conds: list[dict[str, Any]] = [{"field": "headcount.total", "type": "=>", "value": floor}]
         if self.intent.geo and round_no == 1:
-            conds.append({"field": "locations.country", "type": "=", "value": self.intent.geo})
+            from app.agent.intent import CITY_GEO
+            if self.intent.geo in CITY_GEO:
+                conds.append({"field": "locations.city", "type": "=", "value": self.intent.geo})
+            elif self.intent.geo in COUNTRY_CENTROID and self.intent.geo != "Europe":
+                conds.append({"field": "locations.country", "type": "=", "value": self.intent.geo})
         try:
             data, ev = await self.client.search_companies(
                 query=q, mode=mode, filters={"op": "and", "conditions": conds}, fields=SEARCH_FIELDS,
@@ -288,6 +295,8 @@ class Discovery:
             return False, "services/agency firm, not a product company in this market", 0
         if SERVICES_NAME.search(c.name) and not (c.raised_usd or 0) and c.source != "competitors":
             return False, "services-style company name with no funding signal", 0
+        if INVESTOR_FIRM.search(c.name + " " + desc[:300]) and not re.search(r"\b(invest|fund|vc|venture)", self.intent.market_description, re.I):
+            return False, "an investment firm, not a company competing in this market", 0
         if LAW_FIRM.search(c.name + " " + desc[:200]) and not LAW_FIRM.search(self.intent.market_description):
             return False, "a firm that sells services, not a product in this market", 0
         if self.seed and self._namesake(c) and len(core_hit) < 2:
@@ -306,6 +315,29 @@ class Discovery:
             return True, f"{src} of {self.seed.name if self.seed else 'the market'}; shares: {shown or 'category'}", score
         return True, f"matches on: {shown} · {c.headcount or '?'} people", score
 
+    async def _from_compare(self) -> None:
+        """'Should I invest in ElevenLabs or Cartesia?': the named rival is always in the set."""
+        names = self.intent.compare_with
+        if not names:
+            return
+        try:
+            data, ev = await self.client.identify(names=names, label=f"identify comparison: {', '.join(names)}")
+        except CrustError as e:
+            self.tracer.decide("degrade", "comparison", e.message)
+            return
+        for row in data or []:
+            cd = _pick_match(row)
+            if not cd:
+                self.tracer.decide("reject", row.get("matched_on", "?"), "comparison company not found on the graph")
+                continue
+            b = cd.get("basic_info", {})
+            c = Candidate(company_id=cd.get("crustdata_company_id") or b.get("crustdata_company_id"), name=b.get("name") or row.get("matched_on"),
+                          domain=b.get("primary_domain"), description=b.get("description"), categories=b.get("industries") or [],
+                          headcount=_range_mid(b.get("employee_count_range")), source="competitors", ev=[ev])
+            if self._add(c):
+                c.status, c.reason = "accepted", "named by you for the comparison"
+                self.tracer.decide("accept", f"{c.name} ({c.domain})", "named by you for the comparison", ev=[ev])
+
     def _namesake(self, c: Candidate) -> bool:
         seed_core = {t for t in re.findall(r"[a-z0-9]+", (self.seed.name if self.seed else "").lower()) if len(t) >= 3 and t not in ("inc", "the")}
         cand = set(re.findall(r"[a-z0-9]+", (c.name or "").lower())) | set(re.findall(r"[a-z0-9]+", (c.domain or "").split(".")[0].lower()))
@@ -315,6 +347,7 @@ class Discovery:
         t = self.tracer
         t.start("discover", f"Discovering peers for: {self.intent.market_description}")
         await self._from_seed()
+        await self._from_compare()
         self._vocab()
         t.emit("note", f"Core terms: {', '.join(sorted(self.core))}" + (f" · widened by: {', '.join(sorted(self.wide)[:10])}" if self.wide else ""))
         async def web_chain() -> None:

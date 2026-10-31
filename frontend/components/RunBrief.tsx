@@ -8,7 +8,7 @@ import { useRun } from "@/lib/run-context";
 
 /** The answer first: who this is for, the single most important move, and the market in six numbers. */
 export function RunBrief() {
-  const { peers, scenes, lens, trace, status } = useRun();
+  const { peers, scenes, lens, trace, status, query } = useRun();
   if (!peers.length) return null;
   const persona = PERSONAS.find((p) => p.key === lens)!;
   const done = (stage: string) => (trace.find((e) => e.stage === stage && e.type === "stage_done")?.detail as { market?: string } | undefined)?.market;
@@ -71,8 +71,9 @@ export function RunBrief() {
         <span className="rounded-full bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] px-3 py-1 text-[12px] font-medium text-accent">For the {persona.title}</span>
         {market && !/^the market .* competes in$/.test(market) && <span className="line-clamp-1 max-w-[760px] text-[13px] text-muted">Market · {market}</span>}
       </div>
+      <div className="mt-5 text-[15px] text-muted">“{query}”</div>
       <motion.h1 key={top?.title ?? "pending"} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-        className="mt-5 max-w-[920px] text-[34px] font-semibold leading-[40px] tracking-[-0.025em] md:text-[44px] md:leading-[50px]">
+        className="mt-2 max-w-[920px] text-[34px] font-semibold leading-[40px] tracking-[-0.025em] md:text-[44px] md:leading-[50px]">
         {top ? top.title : status === "running" ? "Mapping the market…" : "No decision could be drawn."}
       </motion.h1>
       {top && <p className="mt-3 max-w-[820px] text-[15px] leading-[22px] text-fg-2">{top.why}</p>}
