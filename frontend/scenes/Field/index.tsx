@@ -22,7 +22,7 @@ const PULL_LABEL: Record<string, string> = {
 const momentumColor = (m: number | null) => (m == null ? "var(--muted)" : `color-mix(in srgb, var(--accent) ${Math.round(Math.max(0, m - 20) * 1.25)}%, var(--s-other))`);
 
 export function FieldSceneView({ data }: { data: FieldScene }) {
-  const { peer, lens } = useRun();
+  const { peer, lens, scenes } = useRun();
   const dates = data.frames.map((f) => f.date);
   const [idx, setIdx] = useState(Math.max(0, dates.length - 1));
   const [sel, setSel] = useState<number | null>(null);
@@ -34,10 +34,15 @@ export function FieldSceneView({ data }: { data: FieldScene }) {
   );
   const top = ranked[0] ? peer(ranked[0].peer_id) : undefined;
   const distressed = ranked.filter((r) => (r.distress ?? 0) >= 30).length;
+  const targetId = scenes.deck?.target_id ?? null;
+  const tIdx = targetId != null ? ranked.findIndex((r) => r.peer_id === targetId) : -1;
+  const target = tIdx >= 0 ? peer(targetId!) : undefined;
 
   const title =
-    lens === "investor" && top
-      ? <>{top.name} leads <Num value={ranked.length} ev={data.ev[top.id]} /> peers on momentum, <Num value={Math.round(ranked[0].momentum!)} ev={data.ev[top.id]} />/100.</>
+    lens === "investor" && target
+      ? <>{target.name} ranks <Num value={`#${tIdx + 1}`} ev={data.ev[target.id]} /> of {ranked.length} on momentum, <Num value={Math.round(ranked[tIdx].momentum!)} ev={data.ev[target.id]} />/100.</>
+      : lens === "investor" && top
+        ? <>{top.name} leads <Num value={ranked.length} ev={data.ev[top.id]} /> peers on momentum, <Num value={Math.round(ranked[0].momentum!)} ev={data.ev[top.id]} />/100.</>
       : lens === "operator"
         ? <>Who is accelerating toward you{distressed ? <>, and who is stalling.</> : "."}</>
         : <>Earned growth versus bought growth.</>;
