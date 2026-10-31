@@ -24,7 +24,6 @@ export function DeckSceneView({ data }: { data: DeckScene }) {
     tick();
     const t = setInterval(tick, 60_000);
     return () => { stop = true; clearInterval(t); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, live.length]);
 
   const title = target && lens !== "founder"

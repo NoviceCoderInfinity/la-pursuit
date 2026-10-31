@@ -1,6 +1,7 @@
 """Stage 3: build the peer set from several candidate sources, qualify each, widen/narrow until 8-15."""
 from __future__ import annotations
 
+import asyncio
 import math
 import re
 from datetime import datetime
@@ -10,13 +11,15 @@ from app.config import settings
 from app.crust.client import CrustClient, CrustError
 from app.crust.fields import SEARCH_FIELDS
 from app.models import Candidate, Intent
-from app.textutil import overlap, tokens
+from app.textutil import find_domain, terms, tokens
 from app.trace import Tracer
 
 SERVICES = re.compile(r"\b(agency|agencies|consultanc(y|ies)|consulting|freelanc|outsourc|staffing|recruit(ing|ment)|"
                       r"marketing services|web design|digital marketing|training institute|academy|bootcamp|"
-                      r"it services|software development services|custom software|offshore|system integrator)\b", re.I)
-SERVICES_NAME = re.compile(r"\b(solutions|infosolutions|infotech|infosystems|services|pvt|technologies llc|softwares?)\b", re.I)
+                      r"it services|software development services|custom software|offshore|system integrator|"
+                      r"custom ai|development company|for (?:our )?clients|delivered \d+\+? (?:projects|solutions))\b", re.I)
+SERVICES_NAME = re.compile(r"\b(solutions|infosolutions|infotech|infosystems|services|pvt|technologies llc|softwares?|"
+                           r"ltd|limited|llp|global)\b", re.I)
 AGG_DOMAINS = ("linkedin.com", "crunchbase.com", "g2.com", "capterra.com", "producthunt.com", "wikipedia.org",
                "medium.com", "reddit.com", "youtube.com", "github.com", "techcrunch.com", "forbes.com", "google.com")
 
@@ -32,11 +35,36 @@ def _cand_from_search(c: dict[str, Any], ev: str) -> Candidate:
 
 
 class Discovery:
-    def __init__(self, intent: Intent, seed: Candidate | None, client: CrustClient, tracer: Tracer):
+    def __init__(self, intent: Intent, seed: Candidate | None, client: CrustClient, tracer: Tracer, query: str = ""):
         self.intent, self.seed, self.client, self.tracer = intent, seed, client, tracer
         self.candidates: dict[int, Candidate] = {}
         self.market = intent.market_description
         self.keywords = " ".join(intent.keywords)
+        # The user's own words are the market's core; generated descriptions only widen it.
+        self.query = query
+        self.core: set[str] = set()
+        self.wide: set[str] = set()
+        self.geo: set[str] = set()
+
+    def _vocab(self) -> None:
+        if self.seed or self.intent.segment:
+            # "AI receptionist for dental clinics": the product is the core; the clinics are customers, not peers
+            self.core = terms(self.intent.market_description)
+        else:
+            self.core = terms(self.query) or terms(self.intent.market_description)
+        if not self.core:  # "AI software startups" is all stop words: keep the raw words rather than accept everything
+            self.core = {w for w in re.findall(r"[a-z0-9]+", (self.query or self.intent.market_description).lower()) if len(w) > 1}
+        self.wide = (terms(self.intent.market_description) | terms(self.keywords) | terms(self.intent.segment)) - self.core
+        # A place says where, not what: "india" alone must not qualify a 10,000-person conglomerate.
+        self.geo = terms(self.intent.geo)
+
+    @property
+    def subject(self) -> str:
+        """Short phrase for web queries: the user's phrase, not a generated paragraph."""
+        md = self.intent.market_description
+        if len(md.split()) <= 6 or not self.query:
+            return md
+        return self.query
 
     # ---- candidate sources ---------------------------------------------------
     async def _from_seed(self) -> None:
@@ -91,45 +119,89 @@ class Discovery:
 
     async def _from_web(self) -> None:
         """Web search for '<seed|market> competitors/alternatives', extract capitalised names, verify via identify."""
-        subject = self.seed.name if self.seed else self.intent.market_description
+        subject = self.seed.name if self.seed else self.subject
         q = f"{subject} competitors alternatives" if self.seed else f"best {subject} companies alternatives"
         results: list[dict[str, Any]] = []
         evs: list[str] = []
         q2 = f"top {subject} companies {datetime.now().year}" if not self.seed else f"{subject} vs"
-        for query, srcs in ((q, ["web"]), (q2, ["web", "news"])):
+        async def one(query: str, srcs: list[str]) -> None:
             try:
                 data, ev = await self.client.web_search(query, sources=srcs, label=f"web/search “{query}”")
-                results += data.get("results", [])
+                results.extend(data.get("results", []))
                 evs.append(ev)
             except CrustError as e:
                 self.tracer.decide("degrade", "web search", e.message)
+        await asyncio.gather(one(q, ["web"]), one(q2, ["web", "news"]))
         ev = evs[0] if evs else ""
-        names = _extract_names(results, exclude={subject.lower()})
+        names = self._company_like(_extract_names(results, exclude={subject.lower()}))
         if not names:
             return
         self.tracer.emit("note", f"Web mentions to verify on the graph: {', '.join(names[:12])}", ev=[ev])
-        try:
-            idd, ev2 = await self.client.identify(names=names[:12], label=f"identify {len(names[:12])} web-mentioned names")
-        except CrustError as e:
-            self.tracer.decide("degrade", "identify web names", e.message)
-            return
-        from app.agent.resolve import _cand_from_match, score_matches
-        for row in idd or []:
-            ms = [m for m in (row.get("matches") or []) if float(m.get("confidence_score") or 0) >= 0.6]
-            if not ms:
+        await self._resolve_web_names(names[:12], ev)
+
+    def _company_like(self, names: list[str]) -> list[str]:
+        """Drop names that are just the market's own words ("Legal", "Law", "Lawyers") read as companies."""
+        market = self.core | self.wide | self.geo
+        return [n for n in names if not (terms(n) and terms(n) <= market)]
+
+    async def _resolve_web_names(self, names: list[str], ev: str) -> None:
+        doms = [d for d in (find_domain(n) for n in names) if d]
+        plain = [n for n in names if not find_domain(n)]
+        rows: list[tuple[dict[str, Any], str]] = []
+        for kind, items in (("names", plain), ("domains", doms)):
+            if not items:
                 continue
-            cands = [_cand_from_match(m, "web", ev2) for m in ms]
-            scored = score_matches(ms, cands, row.get("matched_on") or "", self.intent.market_description + " " + self.keywords)
-            best_score, c, conf = scored[0]
-            if conf < 0.8 and best_score < 2.0:
+            try:
+                idd, ev2 = await self.client.identify(**{kind: items}, label=f"identify {len(items)} web-mentioned {kind}")
+            except CrustError as e:
+                self.tracer.decide("degrade", f"identify web {kind}", e.message)
                 continue
-            b = ms[cands.index(c)].get("company_data", {}).get("basic_info", {})
-            c.headcount = _range_mid(b.get("employee_count_range"))
-            c.ev = [ev, ev2]
-            if len(scored) > 1 and scored[1][0] > best_score - 0.3:
-                self.tracer.decide("disambiguate", row.get("matched_on") or c.name,
-                                   f"chose {c.name} ({c.domain}) over {scored[1][1].name} ({scored[1][1].domain}) by market-description overlap", ev=[ev2])
+            rows += [(row, ev2) for row in idd or []]
+        picked = [(_pick_match(row), row, ev2) for row, ev2 in rows]
+        # A bare name that resolves to nothing or a tiny namesake ("Synthflow" → synthflow.ink, 6 people)
+        # usually means the real company sits on <name>.ai; check that in one batched call.
+        weak = {f"{_norm_name(row.get('matched_on'))}.ai": row.get("matched_on") for cd, row, _ in picked
+                if row.get("match_type") != "domain" and _norm_name(row.get("matched_on"))
+                and (not cd or (_range_mid(cd.get("basic_info", {}).get("employee_count_range")) or 0) < 10)}
+        if weak:
+            try:
+                idd, ev3 = await self.client.identify(domains=list(weak), label=f"identify {len(weak)} names as .ai domains")
+                for row in idd or []:
+                    cd = _pick_match(row)
+                    if cd and _norm_name(cd.get("basic_info", {}).get("name")) == _norm_name(weak.get(row.get("matched_on"), "")):
+                        picked.append((cd, row, ev3))
+            except CrustError as e:
+                self.tracer.decide("degrade", "identify .ai domains", e.message)
+        for cd, row, ev2 in picked:
+            if not cd or not cd.get("basic_info", {}).get("primary_domain"):
+                continue
+            b = cd.get("basic_info", {})
+            c = Candidate(company_id=cd.get("crustdata_company_id") or b.get("crustdata_company_id"), name=b.get("name") or row.get("matched_on"),
+                          domain=b.get("primary_domain"), description=b.get("description"), founded=b.get("year_founded"),
+                          categories=b.get("industries") or [], source="web", ev=[ev, ev2],
+                          headcount=_range_mid(b.get("employee_count_range")))
             self._add(c)
+
+    async def _from_anchor(self) -> None:
+        """No seed company: comparison pages ("Vapi vs Retell") name the rest of the field."""
+        if self.seed:
+            return
+        web = [c for c in self.candidates.values() if c.source == "web" and self.core & terms(c.description)]
+        if len(web) < 2:
+            return
+        a, b = sorted(web, key=_credibility, reverse=True)[:2]
+        q = f"{a.name} vs {b.name} alternatives"
+        try:
+            data, ev = await self.client.web_search(q, sources=["web"], label=f"web/search “{q}”")
+        except CrustError as e:
+            self.tracer.decide("degrade", "comparison search", e.message)
+            return
+        known = {_norm_name(c.name) for c in self.candidates.values()}
+        names = [n for n in self._company_like(_extract_names(data.get("results", []), exclude={a.name.lower(), b.name.lower()}))
+                 if _norm_name(n) not in known]
+        if names:
+            self.tracer.emit("note", f"Named alongside {a.name} and {b.name}: {', '.join(names[:10])}", ev=[ev])
+            await self._resolve_web_names(names[:10], ev)
 
     async def _identify_ids(self, ids: list[int], source: str) -> None:
         try:
@@ -183,7 +255,14 @@ class Discovery:
         return n
 
     def _add(self, c: Candidate) -> bool:
-        if not c.company_id or c.company_id in self.candidates:
+        if not c.company_id:
+            return False
+        prev = self.candidates.get(c.company_id)
+        if prev:
+            # Found by search and also named by the web/graph: that's corroboration, whichever arrived first.
+            if c.source in ("web", "competitors") and prev.source not in ("web", "competitors", "seed"):
+                prev.source = c.source
+                prev.ev = list(dict.fromkeys(prev.ev + c.ev))
             return False
         if self.seed and c.company_id == self.seed.company_id:
             return False
@@ -191,21 +270,13 @@ class Discovery:
         return True
 
     # ---- qualification -----------------------------------------------------------
-    def _market_terms(self) -> set[str]:
-        md = self.intent.market_description
-        terms = tokens(md) | tokens(self.keywords)
-        if not terms:  # "AI software startups" is all stop words: fall back to the raw words
-            terms = {w for w in re.findall(r"[a-z0-9]+", md.lower()) if len(w) > 1}
-        return terms
-
     def _qualify(self, c: Candidate) -> tuple[bool, str, float]:
         desc = c.description or ""
-        terms = self._market_terms()
-        cand_terms = tokens(desc + " " + " ".join(c.categories)) | {w for w in re.findall(r"[a-z0-9]+", (desc + " " + " ".join(c.categories)).lower()) if len(w) > 1}
-        rel = max(overlap(self.intent.market_description, desc), overlap(self.keywords, desc),
-                  overlap(self.intent.market_description, " ".join(c.categories)),
-                  (len(terms & cand_terms) / len(terms)) if terms else 0.0)
-        matched = sorted(terms & cand_terms)[:5]
+        doc = terms(desc + " " + " ".join(c.categories))
+        core_hit = sorted((self.core - self.geo) & doc)
+        wide_hit = sorted(self.wide & doc)
+        rel = 0.7 * len(core_hit) / max(1, len(self.core - self.geo)) + 0.3 * len(wide_hit) / max(1, len(self.wide))
+        shown = ", ".join((core_hit + wide_hit)[:5])
         if not desc:
             return False, "no company description on the graph", 0
         if (c.headcount or 0) < 3:
@@ -214,29 +285,36 @@ class Discovery:
             return False, "services/agency firm, not a product company in this market", 0
         if SERVICES_NAME.search(c.name) and not (c.raised_usd or 0) and c.source != "competitors":
             return False, "services-style company name with no funding signal", 0
-        need = min(2, len(terms))
-        if c.source in ("competitors", "web") and (rel >= 0.05 or matched):
-            score = 1.5 + rel + math.log1p(c.headcount or 0) / 4 + math.log1p((c.raised_usd or 0) / 1e6) / 20
-            src = "listed as a competitor" if c.source == "competitors" else "named alongside the seed on the web"
-            return True, f"{src} of {self.seed.name if self.seed else 'the market'}; shares: {', '.join(matched) or 'category'}", score
-        if rel < 0.08 or len(matched) < need:
-            return False, f"description does not match the market definition (matched {len(matched)} of {need} needed terms)", 0
-        score = 2 * rel + math.log1p(c.headcount or 0) / 4 + math.log1p((c.raised_usd or 0) / 1e6) / 20
-        return True, f"matches on: {', '.join(matched)} · {c.headcount or '?'} people", score
+        corroborated = c.source in ("competitors", "web")
+        need = 1 if corroborated else min(2, len(self.core - self.geo))
+        if len(core_hit) < need and rel < 0.35:
+            return False, f"description does not match the market (core terms {len(core_hit)} of {need} needed: {', '.join(sorted(self.core))})", 0
+        # Named by the web or the graph as a competitor is the strongest evidence we have; identify gives
+        # no funding for these, so the credibility prior alone would undervalue them.
+        score = 2 * rel + _credibility(c) + (1.5 if corroborated else 0)
+        if corroborated:
+            src = "listed as a competitor" if c.source == "competitors" else "named on the web"
+            return True, f"{src} of {self.seed.name if self.seed else 'the market'}; shares: {shown or 'category'}", score
+        return True, f"matches on: {shown} · {c.headcount or '?'} people", score
 
     async def run(self) -> list[Candidate]:
         t = self.tracer
         t.start("discover", f"Discovering peers for: {self.intent.market_description}")
         await self._from_seed()
-        await self._from_web()
+        self._vocab()
+        t.emit("note", f"Core terms: {', '.join(sorted(self.core))}" + (f" · widened by: {', '.join(sorted(self.wide)[:10])}" if self.wide else ""))
+        async def web_chain() -> None:
+            await self._from_web()
+            await self._from_anchor()
+
+        # Independent sources run together; the web chain is sequential (comparison search needs web names).
+        _, n_search, n_inc = await asyncio.gather(web_chain(), self._from_search(1), self._from_incumbents())
         accepted: list[tuple[float, Candidate]] = []
         for rnd in range(1, settings.max_discovery_rounds + 1):
             if rnd > 1:
                 t.decide("widen", "peer search", f"only {len(accepted)} qualified after round {rnd-1}; "
                          f"lowering headcount floor and using {'semantic' if rnd >= 3 else 'hybrid'} search")
-            new = await self._from_search(rnd)
-            if rnd == 1:
-                new += await self._from_incumbents()
+            new = n_search + n_inc if rnd == 1 else await self._from_search(rnd)
             t.emit("note", f"Round {rnd}: {new} new candidates ({len(self.candidates)} total)")
             accepted = []
             for c in self.candidates.values():
@@ -249,14 +327,14 @@ class Discovery:
                     accepted.append((score, c))
             if len(accepted) >= settings.min_peers:
                 break
-            if rnd == 1 and not any(self._qualify(c)[2] > 0 for c in self.candidates.values()) and not accepted:
-                t.decide("degrade", "peer search", "no candidate shares a single term with the request; widening would only add noise")
+            if rnd == 1 and not accepted and not any(terms(c.description) & self.core for c in self.candidates.values()):
+                t.decide("degrade", "peer search", "no candidate shares a single core term with the request; widening would only add noise")
                 break
         accepted.sort(key=lambda s: s[0], reverse=True)
         if len(accepted) > settings.max_peers:
             dropped = accepted[settings.max_peers:]
             t.decide("narrow", "peer set", f"{len(accepted)} qualified; keeping the top {settings.max_peers} by relevance, "
-                     f"size and funding; dropped {', '.join(c.name for _, c in dropped[:6])}{'…' if len(dropped) > 6 else ''}")
+                     f"size, funding and corroboration; dropped {', '.join(c.name for _, c in dropped[:6])}{'…' if len(dropped) > 6 else ''}")
             for _, c in dropped:
                 c.status, c.reason = "rejected", "ranked below the top peers"
             accepted = accepted[:settings.max_peers]
@@ -294,7 +372,7 @@ def _extract_names(results: list[dict[str, Any]], exclude: set[str]) -> list[str
     counts: collections.Counter[str] = collections.Counter()
     pat = re.compile(r"\b([A-Z][A-Za-z0-9]{2,}(?:\.(?:ai|io))?(?:\s+(?:AI|Labs|HQ))?)\b")
     corpus = " ".join(f"{r.get('title') or ''} . {r.get('snippet') or ''}" for r in results)
-    # a word that also appears in lowercase somewhere is a common noun ("Dental", "Clinics", "India" vs "Retell")
+    # a word that also appears in lowercase is a common noun ("Dental", "Clinics", "India"), not a company
     lowercase_words = set(re.findall(r"(?<![A-Za-z])[a-z][a-z0-9]{2,}(?![A-Za-z])", corpus))
     for r in results:
         text = f"{r.get('title') or ''} . {r.get('snippet') or ''}"
@@ -305,9 +383,6 @@ def _extract_names(results: list[dict[str, Any]], exclude: set[str]) -> list[str
             if base in COMMON or name.lower() in exclude or base.isupper() and len(base) <= 3:
                 continue
             if len(name.split()) == 1 and base.lower() in lowercase_words:
-                continue
-            # sentence-initial single words are usually not names
-            if len(name.split()) == 1 and (m.start() == 0 or text[max(0, m.start() - 2):m.start()].strip() in (".", "!", "?", ":")):
                 continue
             if name not in seen:
                 seen.add(name)
@@ -320,6 +395,37 @@ def _extract_names(results: list[dict[str, Any]], exclude: set[str]) -> list[str
             continue
         out.append(n)
     return out[:15]
+
+
+def _credibility(c: Candidate) -> float:
+    """Size and funding prior: a 300-person, $200M company outranks an unfunded 13-person one."""
+    hc, raised_m = c.headcount or 0, (c.raised_usd or 0) / 1e6
+    penalty = 0.8 if not raised_m and hc < 25 else 0
+    return math.log1p(hc) / 3 + math.log1p(raised_m) / 6 - penalty
+
+
+def _norm_name(s: str | None) -> str:
+    s = (s or "").lower()
+    s = re.sub(r"\.(ai|io|com|co)\b", "", s)
+    return re.sub(r"[^a-z0-9]+", "", re.sub(r"\b(ai|inc|labs|hq)\b", "", s))
+
+
+def _pick_match(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Identify returns several near-tied matches for a bare name ("Synthflow" → synthflow.ink and
+    synthflow.ai). Keep the ones whose name actually matches, then prefer the largest company."""
+    ms = row.get("matches") or []
+    if not ms:
+        return None
+    best = max(float(m.get("confidence_score") or 0) for m in ms)
+    if best < 0.6:
+        return None
+    asked = _norm_name(row.get("matched_on"))
+    tied = [m for m in ms if float(m.get("confidence_score") or 0) >= best - 0.05]
+    named = [m for m in tied if asked and _norm_name(m.get("company_data", {}).get("basic_info", {}).get("name")) == asked]
+    pool = named or ([] if best < 0.8 else tied[:1])
+    if not pool:
+        return None
+    return max(pool, key=lambda m: _range_mid(m.get("company_data", {}).get("basic_info", {}).get("employee_count_range")) or 0)["company_data"]
 
 
 def _range_mid(r: str | None) -> int | None:

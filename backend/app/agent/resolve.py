@@ -42,14 +42,22 @@ async def resolve_seed(intent: Intent, query: str, client: CrustClient, tracer: 
     top_score, top_conf = scored[0][0], scored[0][2]
     exact = _exact_name(scored[0][1].name, intent.seed_company_name or "")
     if top_conf < 0.5 and not exact or (top_conf < 0.8 and not exact and top_score < 1.5):
-        tracer.decide("degrade", intent.seed_company_name or "?",
-                      f"best identify match is {scored[0][1].name} ({scored[0][1].domain}) at only {top_conf:.2f} confidence with a different name; "
-                      f"treating the request as a market query instead", ev=[ev])
-        intent.kind, intent.seed_company_name, intent.seed_domain = "market", None, None
-        intent.market_description = query.strip(" .?!")
-        tracer.done("resolve", "No confident match; continuing as a market search")
+        tracer.decide("reject", scored[0][1].name,
+                      f"best identify match is {scored[0][1].name} ({scored[0][1].domain}) at only {top_conf:.2f} confidence "
+                      f"with a different name", ev=[ev])
+        tracer.done("resolve", f"Could not resolve “{intent.seed_company_name}” on the identity graph")
         return None
     best = scored[0][1]
+    # Sanity: a same-named record whose domain doesn't carry the name and whose description shares
+    # nothing with the request ("Zzz" → troutman.com, a law firm) is not the company the user meant.
+    dom_root = re.sub(r"[^a-z0-9]", "", (best.domain or "").split(".")[0].lower())
+    name_in_domain = any(t in dom_root for t in core if len(t) >= 3)
+    ctx_best = overlap(" ".join(t for t in tokens(query) if t not in seed_toks), best.description)
+    if not name_in_domain and ctx_best == 0 and scored[0][2] < 0.95:
+        alts = ", ".join(f"{c.name} ({c.domain})" for _, c, _ in scored[:3])
+        tracer.decide("reject", best.name, f"closest graph records don't look like “{seed_name}”: {alts}", ev=[ev])
+        tracer.done("resolve", f"Could not resolve “{seed_name}” on the identity graph")
+        return None
     best.status, best.reason = "accepted", f"best match (confidence {scored[0][2]:.2f}, score {scored[0][0]:.2f})"
     if len(scored) > 1:
         alts = ", ".join(f"{c.name} ({c.domain})" for _, c, _ in scored[1:4])

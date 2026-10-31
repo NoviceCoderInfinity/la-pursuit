@@ -54,7 +54,12 @@ class Run:
             if until == "intent": return self._finish()
             self.seed = await resolve_seed(self.intent, self.query, self.client, t)
             if until == "resolve": return self._finish()
-            disc = Discovery(self.intent, self.seed, self.client, t)
+            if self.intent.kind == "company" and not self.seed:
+                # Honest failure: never build a market around a company we could not find.
+                self.error = f"Could not resolve “{self.intent.seed_company_name or self.query}” on the identity graph"
+                t.emit("error", self.error, stage="resolve", detail={"suggestion": "Try the company's domain, e.g. acme.ai"})
+                return self._finish()
+            disc = Discovery(self.intent, self.seed, self.client, t, query=self.query)
             self.peers_cands = await disc.run()
             self.candidates = list(disc.candidates.values())
             if until == "discover": return self._finish()

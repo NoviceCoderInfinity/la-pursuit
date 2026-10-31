@@ -15,6 +15,7 @@ UA = "vantage-market-agent/0.1 (hackathon; contact: team)"
 _cache = Cache(str(settings.cache_dir / "geo"))
 _lock = asyncio.Lock()
 _last = 0.0
+live_requests = 0  # Nominatim requests made by this process; callers budget against it
 
 US_STATES = {"AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"}
 ISO3 = {"USA": "United States", "IND": "India", "GBR": "United Kingdom", "DEU": "Germany", "FRA": "France", "CAN": "Canada",
@@ -84,7 +85,7 @@ def normalize(raw: str, country_hint: str | None = None) -> tuple[str, str | Non
     return ", ".join(parts), country
 
 
-async def geocode(raw: str, country_hint: str | None = None) -> dict[str, Any] | None:
+async def geocode(raw: str, country_hint: str | None = None, *, network: bool = True) -> dict[str, Any] | None:
     """Returns {lat, lng, label, source} or None."""
     if not raw:
         return None
@@ -99,11 +100,13 @@ async def geocode(raw: str, country_hint: str | None = None) -> dict[str, Any] |
     key = "nom:" + q.lower()
     if key in _cache:
         return _cache[key]
+    if not network:
+        return None
     hit, completed = await _nominatim(q, country)
     if hit is None and country:
         lat, lng = COUNTRY_CENTROID.get(country, (None, None))
         hit = {"lat": lat, "lng": lng, "label": country, "source": "country-fallback"} if lat is not None else None
-    # cache real answers for 90 days; transient failures only briefly
+    # real answers are cached for 90 days; transient failures and fallbacks only briefly
     _cache.set(key, hit, expire=90 * 24 * 3600 if completed and hit and hit["source"] == "nominatim" else 3600)
     return hit
 
@@ -119,6 +122,8 @@ async def _nominatim(q: str, country: str | None) -> tuple[dict[str, Any] | None
         if wait > 0:
             await asyncio.sleep(wait)
         _last = time.monotonic()
+        global live_requests
+        live_requests += 1
         try:
             async with httpx.AsyncClient(timeout=15.0, headers={"User-Agent": UA}) as h:
                 r = await h.get("https://nominatim.openstreetmap.org/search",
