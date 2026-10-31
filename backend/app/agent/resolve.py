@@ -38,17 +38,33 @@ async def resolve_seed(intent: Intent, query: str, client: CrustClient, tracer: 
         tracer.done("resolve", "No match")
         return None
     cands = [_cand_from_match(m, "seed", ev) for m in matches]
-    seed_name = (intent.seed_company_name or "").strip()
+    scored = score_matches(matches, cands, intent.seed_company_name or "", query + " " + intent.market_description)
+    best = scored[0][1]
+    best.status, best.reason = "accepted", f"best match (confidence {scored[0][2]:.2f}, score {scored[0][0]:.2f})"
+    if len(scored) > 1:
+        alts = ", ".join(f"{c.name} ({c.domain})" for _, c, _ in scored[1:4])
+        tracer.decide("disambiguate", best.name,
+                      f"{len(scored)} candidates matched; chose {best.name} ({best.domain}) by description overlap "
+                      f"with the request and company size; rejected: {alts}", ev=[ev])
+    tracer.done("resolve", f"{best.name} · {best.domain} · id {best.company_id}", company_id=best.company_id)
+    return best
+
+
+def score_matches(matches: list[dict[str, Any]], cands: list[Candidate], seed_name: str, context: str
+                  ) -> list[tuple[float, Candidate, float]]:
+    """Rank identify matches for `seed_name` by confidence + exact-name + TLD hint + tech context + description overlap."""
+    seed_name = seed_name.strip()
     seed_toks = tokens(seed_name) | {t for t in seed_name.lower().split() if t in TLD_WORDS}
     core = [t for t in seed_name.lower().replace(".", " ").split() if t not in TLD_WORDS and t not in {"inc", "ltd", "llc", "co", "the"}]
-    tech_ctx = bool(TECH.search(query))
+    tech_ctx = bool(TECH.search(context))
     scored = []
     for c, m in zip(cands, matches):
         conf = float(m.get("confidence_score") or 0)
         b = m.get("company_data", {}).get("basic_info", {})
         name_l = (c.name or "").lower()
-        # 1. the core name should match exactly, not just contain it ("Bland" vs "Bland Landscaping")
-        name_score = 1.0 if name_l.replace(".", "").split() == core else (0.4 if core and core[0] in name_l.split() else 0.0)
+        cand_core = [t for t in name_l.replace(".", " ").replace("|", " ").split() if t not in TLD_WORDS and t not in {"inc", "ltd", "llc", "co", "the"}]
+        # 1. the core name should match exactly, not just contain it ("Bland" vs "Bland Landscaping"); "Synthflow AI" == "Synthflow"
+        name_score = 1.0 if cand_core == core else (0.4 if core and core[0] in cand_core else 0.0)
         # 2. a TLD-like word in the input ("Bland AI" -> bland.ai, "Retell AI" -> retellai.com) is a strong hint
         dom = (c.domain or "").lower()
         tld_hint = 0.0
@@ -59,20 +75,12 @@ async def resolve_seed(intent: Intent, query: str, client: CrustClient, tracer: 
         inds = " ".join(b.get("industries") or [])
         tech = 0.3 if tech_ctx and ("Software" in inds or "Technology" in inds or "Internet" in inds) else 0.0
         # 4. description overlap with the request, ignoring the company's own name tokens
-        ctx = overlap(" ".join(t for t in tokens(query) if t not in seed_toks), c.description)
+        ctx = overlap(" ".join(t for t in tokens(context) if t not in seed_toks), c.description)
         size_rank = _range_rank(b.get("employee_count_range"))
-        score = conf + name_score + tld_hint + tech + 0.4 * ctx + 0.03 * size_rank
+        score = conf + name_score + tld_hint + tech + 0.9 * ctx + 0.03 * size_rank
         scored.append((score, c, conf))
     scored.sort(key=lambda t: t[0], reverse=True)
-    best = scored[0][1]
-    best.status, best.reason = "accepted", f"best match (confidence {scored[0][2]:.2f}, score {scored[0][0]:.2f})"
-    if len(scored) > 1:
-        alts = ", ".join(f"{c.name} ({c.domain})" for _, c, _ in scored[1:4])
-        tracer.decide("disambiguate", best.name,
-                      f"{len(scored)} candidates matched; chose {best.name} ({best.domain}) by description overlap "
-                      f"with the request and company size; rejected: {alts}", ev=[ev])
-    tracer.done("resolve", f"{best.name} · {best.domain} · id {best.company_id}", company_id=best.company_id)
-    return best
+    return scored
 
 
 TLD_WORDS = {"ai", "io", "app", "dev", "co", "com", "xyz", "tech", "cloud"}

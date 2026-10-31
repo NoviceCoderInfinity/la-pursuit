@@ -195,5 +195,5 @@ async def register_watches(run: "Run") -> list[dict[str, Any]]:
             out.append(rec)
         except CrustError as e:
             t.decide("degrade", "discovery watch", e.message)
-    t.done("watch", f"{sum(1 for w in out if w.get('id'))} watches live · {len(out)} configured", watches=len(out))
+    t.done("watch", f"{sum(1 for w in out if w.get('id') and w.get('id') != 'preview')} watches live · {len(out)} configured", watches=len(out))
     return out

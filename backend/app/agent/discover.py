@@ -113,16 +113,22 @@ class Discovery:
         except CrustError as e:
             self.tracer.decide("degrade", "identify web names", e.message)
             return
+        from app.agent.resolve import _cand_from_match, score_matches
         for row in idd or []:
-            ms = row.get("matches") or []
-            if not ms or float(ms[0].get("confidence_score") or 0) < 0.8:
+            ms = [m for m in (row.get("matches") or []) if float(m.get("confidence_score") or 0) >= 0.6]
+            if not ms:
                 continue
-            cd = ms[0].get("company_data", {})
-            b = cd.get("basic_info", {})
-            c = Candidate(company_id=cd.get("crustdata_company_id") or b.get("crustdata_company_id"), name=b.get("name") or row.get("matched_on"),
-                          domain=b.get("primary_domain"), description=b.get("description"), founded=b.get("year_founded"),
-                          categories=b.get("industries") or [], source="web", ev=[ev, ev2],
-                          headcount=_range_mid(b.get("employee_count_range")))
+            cands = [_cand_from_match(m, "web", ev2) for m in ms]
+            scored = score_matches(ms, cands, row.get("matched_on") or "", self.intent.market_description + " " + self.keywords)
+            best_score, c, conf = scored[0]
+            if conf < 0.8 and best_score < 2.0:
+                continue
+            b = ms[cands.index(c)].get("company_data", {}).get("basic_info", {})
+            c.headcount = _range_mid(b.get("employee_count_range"))
+            c.ev = [ev, ev2]
+            if len(scored) > 1 and scored[1][0] > best_score - 0.3:
+                self.tracer.decide("disambiguate", row.get("matched_on") or c.name,
+                                   f"chose {c.name} ({c.domain}) over {scored[1][1].name} ({scored[1][1].domain}) by market-description overlap", ev=[ev2])
             self._add(c)
 
     async def _identify_ids(self, ids: list[int], source: str) -> None:
