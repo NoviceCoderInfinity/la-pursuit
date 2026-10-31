@@ -48,7 +48,8 @@ def build_deck(run: "Run", lens: str) -> dict[str, Any]:
         moves.append({"title": title, "why": why, "confidence": round(conf, 2), "ev": [e for e in ev if e], "scene": scene, "links": links or []})
 
     gtm_hits = [p for p in run.peers if (per.get(p.id, {}).get("gtm") or {}).get("detected")]
-    distressed = sorted((p for p in run.peers if (per.get(p.id, {}).get("distress") or 0) >= 30), key=lambda p: -per[p.id]["distress"])
+    distressed = sorted((p for p in run.peers if (per.get(p.id, {}).get("distress") or 0) >= 30 and not p.is_seed),
+                        key=lambda p: -per[p.id]["distress"])
     tal = {r["peer_id"]: r for r in talent["peers"]}
     net_winners = sorted(talent["peers"], key=lambda r: -r["net_flow"])
     kingmakers = cap["kingmakers"]
