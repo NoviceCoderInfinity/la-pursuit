@@ -1,8 +1,6 @@
 // Client for the PRD §8 API. Falls back to a local run when the backend is unreachable, so every
 // screen works offline. Mock run ids start with "mock_". The fallback replays the recorded run in
-// fixtures/voice_ai.json (copied to public/ by `predev`/`prebuild`); the synthetic run in mock.ts is
-// only used if that file is missing.
-import { mockDeck, mockReport, mockTrace } from "./mock";
+// fixtures/voice_ai.json (copied to public/ by `predev`/`prebuild`).
 import type { DeckScene, EvidenceEntry, Lens, RunReport, TraceEvent } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
@@ -13,20 +11,16 @@ const REPLAY_MAX_GAP_MS = 700;
 
 export const isMock = (runId: string) => runId.startsWith("mock_");
 
-type Offline = { report: RunReport; recorded: boolean };
 let fixture: Promise<RunReport | null> | null = null;
 const loadFixture = () =>
   (fixture ??= fetch(FIXTURE_URL)
     .then((r) => (r.ok ? (r.json() as Promise<RunReport>) : null))
     .catch(() => null));
 
-const synthetic = new Map<string, RunReport>();
-async function offline(query: string, lens?: Lens): Promise<Offline> {
+async function offline(): Promise<RunReport> {
   const rec = await loadFixture();
-  if (rec) return { report: rec, recorded: true };
-  const key = `${query}|${lens ?? ""}`;
-  if (!synthetic.has(key)) synthetic.set(key, mockReport(query, lens));
-  return { report: synthetic.get(key)!, recorded: false };
+  if (!rec) throw new Error("No backend and no recorded run (fixtures/voice_ai.json) available");
+  return rec;
 }
 
 /** Recorded trace → replay schedule, keeping the real rhythm but compressed. */
@@ -75,11 +69,16 @@ export function subscribe(
   if (isMock(runId)) {
     let timers: ReturnType<typeof setTimeout>[] = [];
     let cancelled = false;
-    offline(ctx.query, ctx.lens).then(({ report, recorded }) => {
-      if (cancelled) return;
-      const plan = recorded ? replay(report.trace) : mockTrace(report);
-      timers = plan.map(({ delay, ev }) => setTimeout(() => onEvent(ev), delay));
-    });
+    offline()
+      .then((report) => {
+        if (cancelled) return;
+        timers = replay(report.trace).map(({ delay, ev }) => setTimeout(() => onEvent(ev), delay));
+      })
+      .catch((err: Error) => {
+        const ts = new Date().toISOString();
+        onEvent({ ts, stage: "client", type: "error", label: err.message });
+        onEvent({ ts, stage: "client", type: "done", label: "done" });
+      });
     return () => {
       cancelled = true;
       timers.forEach(clearTimeout);
@@ -99,21 +98,20 @@ export function subscribe(
   return () => es.close();
 }
 
-export async function getReport(runId: string, ctx: { query: string; lens?: Lens }): Promise<RunReport> {
-  if (isMock(runId)) return (await offline(ctx.query, ctx.lens)).report;
+export async function getReport(runId: string): Promise<RunReport> {
+  if (isMock(runId)) return offline();
   return json<RunReport>(`/api/run/${runId}`);
 }
 
-export async function getEvidence(runId: string, evId: string, ctx: { query: string; lens?: Lens }): Promise<EvidenceEntry | null> {
-  if (isMock(runId)) return (await offline(ctx.query, ctx.lens)).report.ledger.find((e) => e.id === evId) ?? null;
+export async function getEvidence(runId: string, evId: string): Promise<EvidenceEntry | null> {
+  if (isMock(runId)) return (await offline()).ledger.find((e) => e.id === evId) ?? null;
   return json<EvidenceEntry>(`/api/run/${runId}/evidence/${evId}`);
 }
 
-export async function setLens(runId: string, lens: Lens, ctx: { query: string; lens?: Lens }): Promise<DeckScene> {
+export async function setLens(runId: string, lens: Lens): Promise<DeckScene> {
   if (isMock(runId)) {
-    const { report, recorded } = await offline(ctx.query, ctx.lens);
     // A recording holds one lens's deck; re-ranking needs the backend.
-    return recorded ? { ...(report.scenes.deck as DeckScene), lens } : mockDeck(lens, report.peers);
+    return { ...((await offline()).scenes.deck as DeckScene), lens };
   }
   return json<DeckScene>(`/api/run/${runId}/lens`, { method: "POST", body: JSON.stringify({ lens }) });
 }

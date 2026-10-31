@@ -8,7 +8,7 @@ import type { EvidenceEntry } from "@/lib/types";
 import { cx } from "@/lib/format";
 
 export function EvidenceDrawer() {
-  const { evidence, closeEvidence, runId, query } = useRun();
+  const { evidence, closeEvidence, runId } = useRun();
   const [active, setActive] = useState(0);
   const [entries, setEntries] = useState<Record<string, EvidenceEntry | null>>({});
   const [copied, setCopied] = useState(false);
@@ -18,7 +18,7 @@ export function EvidenceDrawer() {
     if (!evidence) return;
     evidence.forEach((id) => {
       if (id in entries) return;
-      getEvidence(runId, id, { query })
+      getEvidence(runId, id)
         .then((e) => setEntries((m) => ({ ...m, [id]: e })))
         .catch(() => setEntries((m) => ({ ...m, [id]: null })));
     });

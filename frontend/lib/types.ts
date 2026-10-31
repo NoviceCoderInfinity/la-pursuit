@@ -57,6 +57,7 @@ export interface GlobeScene {
     people: number;
     kind: "footprint" | "talent" | "expansion";
     to_peer_id?: number;
+    since?: string; // expansion: first month the region appears
     ev: EvId[];
   }[];
   pulses: { peer_id: number; country: string; lat: number; lng: number; jobs_90d: number; ev: EvId[] }[];
@@ -147,6 +148,7 @@ export interface ConstellationScene {
     amount_usd: number | null;
     round: string | null;
     recent: boolean;
+    attributed?: boolean; // false: the round's lead investor is unknown
     ev: EvId[];
   }[];
 }

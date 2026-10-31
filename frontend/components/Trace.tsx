@@ -9,6 +9,7 @@ import { cx } from "@/lib/format";
 
 const GLYPH: Record<string, string> = {
   accept: "+", reject: "−", widen: "↔", narrow: "→←", retry: "↻", degrade: "↓", disambiguate: "?",
+  dispute: "≠", fallback: "⇢",
 };
 
 export function StageBar() {
@@ -39,7 +40,7 @@ export function StageBar() {
 }
 
 export function Trace({ compact }: { compact?: boolean }) {
-  const { trace, credits } = useRun();
+  const { trace, credits, peers } = useRun();
   const list = useRef<HTMLDivElement>(null);
   // Scroll only the trace pane, never the page.
   useEffect(() => {
@@ -48,7 +49,8 @@ export function Trace({ compact }: { compact?: boolean }) {
   }, [trace.length]);
 
   const calls = trace.filter((e) => e.type === "tool_call").length;
-  const accepted = trace.filter((e) => e.decision?.kind === "accept" && e.stage === "discover").length;
+  // Final peer set once enrich reports it; until then, candidates accepted so far (before narrowing).
+  const accepted = peers.length || trace.filter((e) => e.decision?.kind === "accept" && e.stage === "discover").length;
   const rejected = trace.filter((e) => e.decision?.kind === "reject").length;
 
   return (
@@ -80,14 +82,15 @@ function Row({ e }: { e: TraceEvent }) {
 
   const d = e.decision;
   const isErr = e.type === "error";
-  const glyph = d ? GLYPH[d.kind] : e.type === "tool_call" ? "›" : e.type === "tool_result" ? "‹" : e.type === "scene_ready" ? "■" : e.type === "done" ? "✓" : "·";
+  const isNote = e.type === "note";
+  const glyph = d ? GLYPH[d.kind] ?? "·" : e.type === "tool_call" ? "›" : e.type === "tool_result" ? "‹" : e.type === "scene_ready" ? "■" : e.type === "done" ? "✓" : "·";
   const text = d ? d.subject : e.type === "scene_ready" ? `${e.scene} ready` : e.label;
   const meta = d ? d.reason : e.detail ? [e.detail.count != null && `${e.detail.count}`, e.detail.ms != null && `${e.detail.ms}ms`].filter(Boolean).join(" · ") : "";
 
   return (
     <motion.div
       initial={{ opacity: 0, x: -4 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2 }}
-      className={cx("grid grid-cols-[14px_1fr] gap-2", d?.kind === "reject" && "text-muted")}
+      className={cx("grid grid-cols-[14px_1fr] gap-2", (d?.kind === "reject" || isNote) && "text-muted")}
     >
       <span className={cx("text-center", isErr ? "text-red" : d?.kind === "accept" || e.type === "scene_ready" ? "text-accent" : "text-muted")}>{glyph}</span>
       <span className="min-w-0 truncate">
