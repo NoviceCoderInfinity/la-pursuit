@@ -26,6 +26,7 @@ export function FieldSceneView({ data }: { data: FieldScene }) {
   const dates = data.frames.map((f) => f.date);
   const [idx, setIdx] = useState(Math.max(0, dates.length - 1));
   const [sel, setSel] = useState<number | null>(null);
+  const [hot, setHot] = useState<number | null>(null);
   const rows = useMemo(() => new Map((data.table ?? []).map((r) => [r.peer_id, r])), [data.table]);
   const ranked = useMemo(
     () => [...(data.table ?? [])].filter((r) => r.momentum != null).sort((a, b) => b.momentum! - a.momentum!),
@@ -36,7 +37,7 @@ export function FieldSceneView({ data }: { data: FieldScene }) {
 
   const title =
     lens === "investor" && top
-      ? <>{top.name} is pulling away — momentum <Num value={Math.round(ranked[0].momentum!)} ev={data.ev[top.id]} />/100.</>
+      ? <>{top.name} leads <Num value={ranked.length} ev={data.ev[top.id]} /> peers on momentum, <Num value={Math.round(ranked[0].momentum!)} ev={data.ev[top.id]} />/100.</>
       : lens === "operator"
         ? <>Who is accelerating toward you{distressed ? <>, and who is stalling.</> : "."}</>
         : <>Earned growth versus bought growth.</>;
@@ -53,15 +54,15 @@ export function FieldSceneView({ data }: { data: FieldScene }) {
           <span className="text-[12px] text-fg-2">size = raised</span>
         </div>
       }
-      aside={<Leaderboard ranked={ranked} sel={sel} setSel={setSel} ev={data.ev} />}
+      aside={<Leaderboard ranked={ranked} sel={sel} setSel={setSel} ev={data.ev} setHot={setHot} />}
       controls={dates.length > 1 ? <Scrubber dates={dates} index={idx} onIndex={setIdx} format={monthLabel} /> : undefined}
     >
-      <Chart data={data} idx={idx} sel={sel} setSel={setSel} rows={rows} />
+      <Chart data={data} idx={idx} sel={sel} setSel={setSel} rows={rows} hot={hot} />
     </SceneFrame>
   );
 }
 
-function Chart({ data, idx, sel, setSel, rows }: { data: FieldScene; idx: number; sel: number | null; setSel: (id: number | null) => void; rows: Map<number, FieldRow> }) {
+function Chart({ data, idx, sel, setSel, rows, hot }: { data: FieldScene; idx: number; sel: number | null; setSel: (id: number | null) => void; rows: Map<number, FieldRow>; hot: number | null }) {
   const { peer } = useRun();
   const [ref, { width, height }] = useSize<HTMLDivElement>();
   const [hover, setHover] = useState<{ p: PtC; x: number; y: number } | null>(null);
@@ -122,7 +123,7 @@ function Chart({ data, idx, sel, setSel, rows }: { data: FieldScene; idx: number
           {pts.map((p) => {
             const missing = p.cx == null || p.cy == null;
             const cx0 = x(p.cx ?? 0), cy0 = y(p.cy ?? 0), rr = r(p.size);
-            const dim = sel != null && sel !== p.peer_id;
+            const dim = (sel != null && sel !== p.peer_id) || (hot != null && hot !== p.peer_id && sel == null);
             const dis = (p.distress ?? 0) >= 30;
             const name = peer(p.peer_id)?.name ?? `#${p.peer_id}`;
             return (
@@ -141,11 +142,11 @@ function Chart({ data, idx, sel, setSel, rows }: { data: FieldScene; idx: number
                   animate={{ cx: cx0, cy: cy0, r: rr, opacity: dim ? 0.18 : missing ? 0.7 : 0.92 }}
                   transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
                   fill={missing ? "transparent" : momentumColor(p.momentum)}
-                  stroke={missing ? "var(--muted)" : sel === p.peer_id ? "var(--fg)" : "var(--bg)"}
+                  stroke={missing ? "var(--muted)" : sel === p.peer_id || hot === p.peer_id ? "var(--fg)" : "var(--bg)"}
                   strokeDasharray={missing ? "3 3" : undefined}
-                  strokeWidth={sel === p.peer_id ? 2 : 1.5}
+                  strokeWidth={sel === p.peer_id || hot === p.peer_id ? 2 : 1.5}
                 />
-                {(labelled.has(p.peer_id) || sel === p.peer_id) && (
+                {(labelled.has(p.peer_id) || sel === p.peer_id || hot === p.peer_id) && (
                   <motion.text initial={false} animate={{ x: cx0 + rr + 6, y: cy0 + 4, opacity: dim ? 0.2 : 1 }} transition={{ duration: 0.35 }}
                     className="fill-[var(--fg)] text-[12px] font-medium" style={{ pointerEvents: "none" }}>{name}{p.clamped ? " ↗" : ""}</motion.text>
                 )}
@@ -174,7 +175,7 @@ function Chart({ data, idx, sel, setSel, rows }: { data: FieldScene; idx: number
 
 const fmtPct = (v: number | null | undefined) => (v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(0)}%`);
 
-function Leaderboard({ ranked, sel, setSel, ev }: { ranked: FieldRow[]; sel: number | null; setSel: (id: number | null) => void; ev: Record<number, string[]> }) {
+function Leaderboard({ ranked, sel, setSel, ev, setHot }: { ranked: FieldRow[]; sel: number | null; setSel: (id: number | null) => void; ev: Record<number, string[]>; setHot: (id: number | null) => void }) {
   const { peer } = useRun();
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-[16px] border border-line">
@@ -189,6 +190,7 @@ function Leaderboard({ ranked, sel, setSel, ev }: { ranked: FieldRow[]; sel: num
           return (
             <div key={r.peer_id} className={cx("border-b border-line last:border-0", open && "bg-bg-2")}>
               <div role="button" tabIndex={0} onClick={() => setSel(open ? null : r.peer_id)} onKeyDown={(e) => e.key === "Enter" && setSel(open ? null : r.peer_id)}
+                onMouseEnter={() => setHot(r.peer_id)} onMouseLeave={() => setHot(null)}
                 className="grid w-full cursor-pointer grid-cols-[24px_1fr_44px] items-center gap-3 px-4 py-2.5 text-left hover:bg-bg-2">
                 <span className="font-mono text-[11px] text-muted tnum">{String(i + 1).padStart(2, "0")}</span>
                 <span className="min-w-0">
