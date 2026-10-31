@@ -61,6 +61,10 @@ class Discovery:
         self.wide = (terms(self.intent.market_description) | terms(self.keywords) | terms(self.intent.segment)) - self.core
         # A place says where, not what: "india" alone must not qualify a 10,000-person conglomerate.
         self.geo = terms(self.intent.geo)
+        # Concepts, not words: "note-taker" is also a scribe, notes, documentation, transcription.
+        self.concepts = [_expand(t) for t in sorted(self.core - self.geo)]
+        self.segment_concept = set().union(*(_expand(t) for t in terms(self.intent.segment))) if self.intent.segment else set()
+        self.core = self.core | set().union(*self.concepts) if self.concepts else self.core
 
     @property
     def subject(self) -> str:
@@ -126,10 +130,11 @@ class Discovery:
     async def _from_web(self) -> None:
         """Web search for '<seed|market> competitors/alternatives', extract capitalised names, verify via identify."""
         subject = self.seed.name if self.seed else self.subject
-        q = f"{subject} competitors alternatives" if self.seed else f"best {subject} companies alternatives"
+        seg = f" for {self.intent.segment}" if self.intent.segment and not self.seed else ""
+        q = f"{subject} competitors alternatives" if self.seed else f"best {subject}{seg} companies alternatives"
         results: list[dict[str, Any]] = []
         evs: list[str] = []
-        q2 = f"top {subject} companies {datetime.now().year}" if not self.seed else f"{subject} vs"
+        q2 = f"top {subject}{seg} companies {datetime.now().year}" if not self.seed else f"{subject} vs"
         async def one(query: str, srcs: list[str]) -> None:
             try:
                 data, ev = await self.client.web_search(query, sources=srcs, label=f"web/search “{query}”")
@@ -283,7 +288,9 @@ class Discovery:
     def _qualify(self, c: Candidate) -> tuple[bool, str, float]:
         desc = c.description or ""
         doc = terms(desc + " " + " ".join(c.categories))
-        core_hit = sorted((self.core - self.geo) & doc)
+        doc |= {p for t in doc if "-" in t for p in t.split("-") if len(p) > 2}
+        concept_hits = [sorted(cs & doc)[0] for cs in self.concepts if cs & doc]
+        core_hit = sorted(set(concept_hits)) if self.concepts else sorted((self.core - self.geo) & doc)
         wide_hit = sorted(self.wide & doc)
         rel = 0.7 * len(core_hit) / max(1, len(self.core - self.geo)) + 0.3 * len(wide_hit) / max(1, len(self.wide))
         shown = ", ".join((core_hit + wide_hit)[:5])
@@ -303,6 +310,8 @@ class Discovery:
             return False, f"shares the name “{self.seed.name}” but not the market", 0
         if (c.headcount or 0) < 10 and not (c.raised_usd or 0):
             return False, f"too small to matter ({c.headcount or '?'} people, no funding)", 0
+        if self.segment_concept and not (self.segment_concept & doc) and c.source != "competitors":
+            return False, f"not built for {self.intent.segment}", 0
         corroborated = c.source in ("competitors", "web")
         need = 1 if corroborated else min(2, len(self.core - self.geo))
         if len(core_hit) < need and rel < 0.35:
@@ -387,8 +396,8 @@ class Discovery:
             accepted = accepted[:settings.max_peers]
         peers, seen_names = [], set()
         for _, c in accepted:  # "ElevenLabs" and "Eleven Labs" are one company: keep the larger record
-            key = _norm_name(c.name)
-            if key in seen_names or (self.seed and key == _norm_name(self.seed.name)):
+            key = _dup_key(c.name)
+            if key in seen_names or (self.seed and key == _dup_key(self.seed.name)):
                 c.status, c.reason = "rejected", "duplicate of a company already in the set"
                 continue
             seen_names.add(key)
@@ -471,6 +480,43 @@ def _credibility(c: Candidate) -> float:
     hc, raised_m = c.headcount or 0, (c.raised_usd or 0) / 1e6
     penalty = 0.8 if not raised_m and hc < 25 else 0
     return math.log1p(hc) / 3 + math.log1p(raised_m) / 6 - penalty
+
+
+SYNONYMS: list[set[str]] = [
+    {"note-taker", "notetaker", "note", "notes", "scribe", "documentation", "transcription", "charting"},
+    {"receptionist", "answering", "front-desk", "frontdesk", "phone", "call", "calls", "scheduling"},
+    {"copilot", "assistant", "assistants"},
+    {"coding", "code", "developer", "developers", "software engineering", "programming"},
+    {"expense", "spend", "card", "cards", "reimbursement"},
+    {"crm", "sales", "pipeline"},
+    {"recycling", "recycle", "recycled", "recovery"},
+    {"humanoid", "robot", "robots", "robotics"},
+    {"doctor", "doctors", "physician", "physicians", "clinician", "clinicians", "clinical", "medical", "healthcare", "health", "hospital", "patient"},
+    {"dental", "dentist", "dentists", "clinic", "clinics", "practice", "practices", "healthcare", "patient"},
+    {"lawyer", "lawyers", "legal", "law"},
+    {"sme", "smes", "small", "business", "businesses", "msme"},
+]
+
+
+def _expand(t: str) -> set[str]:
+    from app.textutil import _stem
+    out = {t, _stem(t)}
+    parts = [p for p in t.split("-") if len(p) > 2]
+    out |= set(parts)
+    for group in SYNONYMS:
+        g = group | {_stem(x) for x in group}
+        if t in g or _stem(t) in g:
+            out |= g
+    return out
+
+
+def _dup_key(s: str | None) -> str:
+    """'ElevenLabs', 'Eleven Labs', 'Eleven Labs Inc.' -> 'eleven'."""
+    k = re.sub(r"[^a-z0-9]", "", (s or "").lower())
+    for suf in ("inc", "hq", "labs", "ai", "io"):
+        if k.endswith(suf) and len(k) > len(suf) + 2:
+            k = k[: -len(suf)]
+    return k
 
 
 def _norm_name(s: str | None) -> str:

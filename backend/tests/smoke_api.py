@@ -1,5 +1,5 @@
 """End-to-end smoke test against a running server: POST /api/run, stream SSE, fetch report, save fixture.
-usage: python tests/smoke_api.py "AI voice agent platforms" [--base http://127.0.0.1:8001] [--fixture ../fixtures/voice_ai.json] [--lens investor]
+usage: python tests/smoke_api.py "AI voice agent platforms" [--base http://127.0.0.1:8001] [--fixture out.json] [--lens investor]
 """
 from __future__ import annotations
 

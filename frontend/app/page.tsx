@@ -59,17 +59,26 @@ export default function Home() {
 
       <section className="mx-auto flex max-w-[860px] flex-col items-center px-6 pt-[9vh] text-center">
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="eyebrow">
-          Market intelligence on Crustdata
+          Live on Crustdata&apos;s company and people graph
         </motion.div>
         <motion.h1
           initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.05 }}
-          className="mt-5 text-[44px] font-semibold leading-[1.02] tracking-[-0.04em] sm:text-[72px]"
+          className="mt-5 text-[40px] font-semibold leading-[1.04] tracking-[-0.04em] sm:text-[64px]"
         >
-          See the whole market.
+          Ask about any market.<br />Get the decision, with receipts.
         </motion.h1>
-        <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.6, delay: 0.15 }} className="mt-5 text-[17px] text-muted sm:text-[19px]">
-          One sentence in. Seven views out.
+        <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.6, delay: 0.15 }} className="mt-5 max-w-[640px] text-[17px] leading-[26px] text-fg-2 sm:text-[19px] sm:leading-[28px]">
+          An agent maps the companies, people, hiring and money behind your question, then answers it as an investor, operator or founder. Every number links to the Crustdata response it came from.
         </motion.p>
+        {runs && runs.length > 0 && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.6, delay: 0.25 }}
+            className="mt-6 flex flex-wrap justify-center gap-x-6 gap-y-2 font-mono text-[12px] text-muted">
+            <span><span className="text-fg">{runs.reduce((a, r) => a + r.peers, 0)}</span> companies mapped</span>
+            <span><span className="text-fg">{Math.round(runs.reduce((a, r) => a + r.people, 0) / 1000)}K</span> people tracked</span>
+            <span><span className="text-fg">{runs.reduce((a, r) => a + r.evidence, 0).toLocaleString("en-US")}</span> cited data points</span>
+            <span><span className="text-fg">{runs.length}</span> live questions answered</span>
+          </motion.div>
+        )}
 
         <motion.form
           initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.2 }}

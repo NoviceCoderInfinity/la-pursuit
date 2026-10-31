@@ -4,7 +4,7 @@ import { useRunMaybe } from "@/lib/run-context";
 import type { EvId } from "@/lib/types";
 import { cx } from "@/lib/format";
 
-/** Every number on screen is a chip that opens its evidence (PRD §9). */
+/** Every number on screen is a chip that opens its evidence. */
 export function Num({
   value, ev, className, title,
 }: { value: React.ReactNode; ev?: EvId[]; className?: string; title?: string }) {

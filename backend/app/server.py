@@ -1,4 +1,4 @@
-"""FastAPI + SSE surface (PRD §8.1). Runs execute in the background; the trace streams live."""
+"""FastAPI + SSE surface (see README, API). Runs execute in the background; the trace streams live."""
 from __future__ import annotations
 
 import asyncio

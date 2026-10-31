@@ -2,7 +2,7 @@
 
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-/* PRD §9 tokens. Light is the base; dark is its own set, not an inversion. */
+/* Design tokens. Light is the base; dark is its own set, not an inversion. */
 :root {
   color-scheme: light;
   --bg: #ffffff;

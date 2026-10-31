@@ -1,4 +1,4 @@
-"""Shared pydantic models (mirror PRD §8)."""
+"""Shared pydantic models (mirrored in frontend/lib/types.ts)."""
 from __future__ import annotations
 
 from typing import Any, Literal

@@ -1,4 +1,4 @@
-// Client for the PRD §8 API. Falls back to a local run when the backend is unreachable, so every
+// Client for the backend API (see README). Falls back to a local run when the backend is unreachable, so every
 // screen works offline. Mock run ids start with "mock_". The fallback replays the recorded run in
 // fixtures/runs/*.json (live runs recorded with every API response; copied to public/ by `predev`/`prebuild`).
 import type { DeckScene, EvidenceEntry, Lens, RunReport, RunSummary, TraceEvent } from "./types";

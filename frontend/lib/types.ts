@@ -1,4 +1,4 @@
-// Frontend ↔ backend contract. Mirrors PRD §8 exactly; change both sides together.
+// Frontend ↔ backend contract. Mirrors backend/app/models.py and the scene builders; change both sides together.
 
 export type EvId = string;
 export type Lens = "operator" | "investor" | "founder";

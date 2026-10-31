@@ -1,4 +1,4 @@
-"""Scene builders: engine output -> the JSON payloads the frontend renders (PRD §8.5)."""
+"""Scene builders: engine output -> the JSON payloads the frontend renders (frontend/lib/types.ts)."""
 from __future__ import annotations
 
 import re
