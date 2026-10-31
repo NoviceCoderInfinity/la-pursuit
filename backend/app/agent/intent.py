@@ -11,7 +11,7 @@ from app.trace import Tracer
 INVESTOR = re.compile(r"\b(invest|investing|investor|back(ing)?|due diligence|diligence|fund|portfolio|valuation|worth backing|should i (invest|back))\b", re.I)
 OPERATOR = re.compile(r"\b(we are|we're|our company|i run|i work at|i'm at|i am at|our competitors|competitors of us|my company)\b", re.I)
 FOUNDER = re.compile(r"\b(i want to build|want to build|building a|build a|my idea|an idea|idea for|should i build|is there a market|startup idea|launch(ing)? a)\b", re.I)
-COMPANY_HINT = re.compile(r"\b(we are|we're|invest in|back|about|analy[sz]e|map|competitors of|vs\.?|versus)\s+([A-Z][A-Za-z0-9&.\-]+(?:\s+[A-Z][A-Za-z0-9&.\-]+){0,2})", re.I)
+COMPANY_HINT = re.compile(r"\b((?i:we are|we're|invest in|back|about|analy[sz]e|competitors of|vs\.?|versus))\s+([A-Z][A-Za-z0-9&.\-]+(?:\s+[A-Z][A-Za-z0-9&.\-]+){0,2})")
 MARKET_WORDS = re.compile(r"\b(space|market|industry|sector|platforms?|companies|startups|landscape|players|tools?|agents?|vendors)\b", re.I)
 
 SYSTEM = """You classify a one-sentence request for a market-intelligence agent.
@@ -60,33 +60,48 @@ def _rules(q: str) -> Intent:
             seed, kind = m.group(2).strip(" .?!"), "company"
         elif domain or linkedin:
             kind, seed = "company", (domain or linkedin)
-        elif len(words) <= 3 and not MARKET_WORDS.search(text) and text[:1].isupper():
-            kind, seed = "company", text.strip(" .?!")
+        elif len(words) <= 3 and not MARKET_WORDS.search(text):
+            kind, seed = "company", text.strip(" .?!")  # resolve_seed decides whether it is real
     if seed and seed.lower() in {"ai", "the"}:
         seed, kind = None, "market"
     if kind == "company" and lens == "founder":
         lens = "operator"
 
     kw = sorted(tokens(text))[:8]
+    segment = None
     if kind == "company":
         desc = f"the market {seed} competes in"
     elif kind == "idea":
         desc = re.sub(r"^(i want to build|want to build|building|build|my idea is|an idea for|idea for)\s*(an?|the)?\s*", "", text, flags=re.I).strip(" .?!") or text
+        # "AI receptionist for dental clinics in India": the product is the market, the clinics are the customers
+        m = re.match(r"^(?P<core>.+?)\s+(?:for|serving|targeting)\s+(?P<seg>.+?)(?:\s+in\s+[A-Z][\w ]+)?$", desc, flags=re.I)
+        if m and len(m.group("core").split()) >= 1:
+            desc, segment = m.group("core").strip(), m.group("seg").strip(" .?!")
+        kw = sorted(tokens(desc))[:8]
     else:
         desc = re.sub(r"^(map|analy[sz]e|research|show me|what is|who are|the)\s+", "", text, flags=re.I).strip(" .?!") or text
+        m = re.match(r"^(?P<core>.+?)\s+(?:for|serving|targeting)\s+(?P<seg>.+?)(?:\s+in\s+[A-Z][\w ]+)?$", desc, flags=re.I)
+        if m and len(m.group("core").split()) >= 2:
+            desc, segment = m.group("core").strip(), m.group("seg").strip(" .?!")
+        kw = sorted(tokens(desc))[:8]
     return Intent(kind=kind, market_description=desc, seed_company_name=seed if not domain else None,
-                  seed_domain=domain, keywords=kw, geo=_geo(text), lens=lens,  # type: ignore[arg-type]
+                  seed_domain=domain, keywords=kw, geo=_geo(text), lens=lens, segment=segment,  # type: ignore[arg-type]
                   rationale="rule-based classification")
 
 
-GEO = {"india": "India", "indian": "India", "usa": "United States", "us ": "United States", "europe": "Europe",
-       "european": "Europe", "uk": "United Kingdom", "germany": "Germany", "singapore": "Singapore",
-       "australia": "Australia", "canada": "Canada", "brazil": "Brazil", "japan": "Japan"}
+GEO = {"india": "India", "indian": "India", "usa": "United States", "us": "United States", "united states": "United States",
+       "america": "United States", "europe": "Europe", "european": "Europe", "uk": "United Kingdom", "united kingdom": "United Kingdom",
+       "britain": "United Kingdom", "germany": "Germany", "german": "Germany", "singapore": "Singapore", "australia": "Australia",
+       "canada": "Canada", "canadian": "Canada", "brazil": "Brazil", "japan": "Japan", "france": "France", "french": "France",
+       "israel": "Israel", "netherlands": "Netherlands", "spain": "Spain", "mexico": "Mexico", "indonesia": "Indonesia",
+       "uae": "United Arab Emirates", "dubai": "United Arab Emirates", "nigeria": "Nigeria", "kenya": "Kenya", "south africa": "South Africa"}
+_GEO_RE = re.compile(r"\b(" + "|".join(sorted((re.escape(k) for k in GEO), key=len, reverse=True)) + r")\b", re.I)
 
 
 def _geo(text: str) -> str | None:
-    t = text.lower() + " "
-    for k, v in GEO.items():
-        if k in t:
-            return v
-    return None
+    hits = [m.group(1).lower() for m in _GEO_RE.finditer(text)]
+    if not hits:
+        return None
+    # "show us dental clinics in india": a real country name beats the pronoun-shaped "us"
+    specific = [h for h in hits if h not in ("us",)]
+    return GEO[(specific or hits)[-1]]

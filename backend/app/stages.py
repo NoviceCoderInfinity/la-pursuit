@@ -17,6 +17,10 @@ SCENE_ORDER = ["globe", "field", "streams", "chord", "constellation", "truth"]
 async def run_later_stages(run: "Run", until: str | None) -> None:
     t = run.tracer
     seed_id = run.seed.company_id if run.seed else None
+    if not run.companies:
+        t.emit("error", "No peers could be enriched; stopping before signals", detail={"peers": len(run.peers)})
+        run.error = run.error or "No peers could be qualified for this request"
+        return
     run.signals = await collect_signals(run.peers, run.companies, run.client, t, run.ledger, seed_id, run.lens)
     if until == "signals":
         return

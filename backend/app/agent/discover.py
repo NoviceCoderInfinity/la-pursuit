@@ -162,7 +162,8 @@ class Discovery:
         return n
 
     async def _from_search(self, round_no: int) -> int:
-        q = self.market if round_no == 1 else f"{self.intent.market_description} {self.keywords}"
+        seg = f" for {self.intent.segment}" if self.intent.segment else ""
+        q = (self.market + seg) if round_no == 1 else f"{self.intent.market_description}{seg} {self.keywords}"
         floor = {1: 10, 2: 5, 3: 3}[round_no]
         mode = "hybrid" if round_no < 3 else "semantic"
         conds: list[dict[str, Any]] = [{"field": "headcount.total", "type": "=>", "value": floor}]
@@ -190,11 +191,21 @@ class Discovery:
         return True
 
     # ---- qualification -----------------------------------------------------------
+    def _market_terms(self) -> set[str]:
+        md = self.intent.market_description
+        terms = tokens(md) | tokens(self.keywords)
+        if not terms:  # "AI software startups" is all stop words: fall back to the raw words
+            terms = {w for w in re.findall(r"[a-z0-9]+", md.lower()) if len(w) > 1}
+        return terms
+
     def _qualify(self, c: Candidate) -> tuple[bool, str, float]:
         desc = c.description or ""
+        terms = self._market_terms()
+        cand_terms = tokens(desc + " " + " ".join(c.categories)) | {w for w in re.findall(r"[a-z0-9]+", (desc + " " + " ".join(c.categories)).lower()) if len(w) > 1}
         rel = max(overlap(self.intent.market_description, desc), overlap(self.keywords, desc),
-                  overlap(self.intent.market_description, " ".join(c.categories)))
-        matched = sorted(tokens(self.intent.market_description) & tokens(desc + " " + " ".join(c.categories)))[:5]
+                  overlap(self.intent.market_description, " ".join(c.categories)),
+                  (len(terms & cand_terms) / len(terms)) if terms else 0.0)
+        matched = sorted(terms & cand_terms)[:5]
         if not desc:
             return False, "no company description on the graph", 0
         if (c.headcount or 0) < 3:
@@ -203,7 +214,7 @@ class Discovery:
             return False, "services/agency firm, not a product company in this market", 0
         if SERVICES_NAME.search(c.name) and not (c.raised_usd or 0) and c.source != "competitors":
             return False, "services-style company name with no funding signal", 0
-        need = min(2, len(tokens(self.intent.market_description)))
+        need = min(2, len(terms))
         if c.source in ("competitors", "web") and (rel >= 0.05 or matched):
             score = 1.5 + rel + math.log1p(c.headcount or 0) / 4 + math.log1p((c.raised_usd or 0) / 1e6) / 20
             src = "listed as a competitor" if c.source == "competitors" else "named alongside the seed on the web"
@@ -237,6 +248,9 @@ class Discovery:
                     _, _, score = self._qualify(c)
                     accepted.append((score, c))
             if len(accepted) >= settings.min_peers:
+                break
+            if rnd == 1 and not any(self._qualify(c)[2] > 0 for c in self.candidates.values()) and not accepted:
+                t.decide("degrade", "peer search", "no candidate shares a single term with the request; widening would only add noise")
                 break
         accepted.sort(key=lambda s: s[0], reverse=True)
         if len(accepted) > settings.max_peers:
@@ -279,6 +293,9 @@ def _extract_names(results: list[dict[str, Any]], exclude: set[str]) -> list[str
     import collections
     counts: collections.Counter[str] = collections.Counter()
     pat = re.compile(r"\b([A-Z][A-Za-z0-9]{2,}(?:\.(?:ai|io))?(?:\s+(?:AI|Labs|HQ))?)\b")
+    corpus = " ".join(f"{r.get('title') or ''} . {r.get('snippet') or ''}" for r in results)
+    # a word that also appears in lowercase somewhere is a common noun ("Dental", "Clinics", "India" vs "Retell")
+    lowercase_words = set(re.findall(r"(?<![A-Za-z])[a-z][a-z0-9]{2,}(?![A-Za-z])", corpus))
     for r in results:
         text = f"{r.get('title') or ''} . {r.get('snippet') or ''}"
         seen = set()
@@ -286,6 +303,11 @@ def _extract_names(results: list[dict[str, Any]], exclude: set[str]) -> list[str
             name = m.group(1).strip()
             base = name.split()[0]
             if base in COMMON or name.lower() in exclude or base.isupper() and len(base) <= 3:
+                continue
+            if len(name.split()) == 1 and base.lower() in lowercase_words:
+                continue
+            # sentence-initial single words are usually not names
+            if len(name.split()) == 1 and (m.start() == 0 or text[max(0, m.start() - 2):m.start()].strip() in (".", "!", "?", ":")):
                 continue
             if name not in seen:
                 seen.add(name)

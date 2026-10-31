@@ -73,7 +73,7 @@ async def collect_signals(peers: list[Peer], companies: dict[int, dict[str, Any]
             body: dict[str, Any] = {"filters": {"op": "and", "conditions": [
                 {"field": "experience.employment_details.current.company_id", "type": "=", "value": p.id},
                 {"field": "experience.employment_details.past.company_id", "type": "in", "value": others}]},
-                "fields": PERSON_FIELDS, "limit": 40}
+                "fields": PERSON_FIELDS, "limit": 30}
             try:
                 data, ev = await client.search_people(body, label=f"person/search joined {p.name} from a peer")
             except CrustError as e:
@@ -99,7 +99,8 @@ async def collect_signals(peers: list[Peer], companies: dict[int, dict[str, Any]
         out["moves_ev"] = ev_ids
         tracer.emit("note", f"{len(out['moves'])} cross-company moves among peers ({total} matching profiles)", ev=ev_ids[:3])
 
-        # ---- senior joins in the last 6 months -----------------------------------------------------
+    # ---- senior joins in the last 6 months ---------------------------------------------------------
+    if ids:
         since6 = _iso(now - timedelta(days=183))
         body = {"filters": {"op": "and", "conditions": [
                     {"field": "experience.employment_details.current.company_id", "type": "in", "value": ids},
@@ -110,7 +111,9 @@ async def collect_signals(peers: list[Peer], companies: dict[int, dict[str, Any]
             data, ev = await client.search_people(body, label="person/search senior joins · last 6 months")
             for pr in data.get("profiles", []):
                 ed = (pr.get("experience") or {}).get("employment_details") or {}
-                cur = next((c for c in (ed.get("current") or []) if c.get("crustdata_company_id") in peer_ids), None)
+                cur = next((c for c in (ed.get("current") or []) if c.get("crustdata_company_id") in peer_ids
+                            and c.get("seniority_level") in ("CXO", "Vice President", "Director")
+                            and (c.get("start_date") or "") >= since6), None)
                 if not cur:
                     continue
                 past = sorted((ed.get("past") or []), key=lambda x: x.get("end_date") or "", reverse=True)
@@ -162,9 +165,10 @@ async def collect_signals(peers: list[Peer], companies: dict[int, dict[str, Any]
             for label, _cnt in sorted((hc.get("by_region_absolute") or {}).items(), key=lambda kv: -kv[1]):
                 if not _is_country_or_state(label):
                     hq = await geocode(label, country_hint)
-                    if hq:
+                    if hq and hq.get("source") != "country-fallback":
                         hq = {**hq, "label": hq["label"] + " (largest office)"}
                         break
+                    hq = None
         if hq:
             p.hq.lat, p.hq.lng, p.hq.label = hq["lat"], hq["lng"], hq["label"]
             p.hq.city, p.hq.country = loc.get("city") or hq["label"].split(",")[0], ISO3.get(loc.get("country") or "", loc.get("country"))
@@ -182,9 +186,11 @@ async def collect_signals(peers: list[Peer], companies: dict[int, dict[str, Any]
         series = (hc.get("by_function_timeseries") or {}).get("GEO_REGION") or {}
         new_regions = []
         cutoff = _iso(now - timedelta(days=183))
+        coverage_start = min((pts[0]["date"][:10] for pts in series.values() if pts), default=None)
         for label, pts in series.items():
             pts = [x for x in pts if x.get("employee_count")]
-            if pts and pts[0]["date"][:10] >= cutoff and not _is_country_or_state(label):
+            if pts and pts[0]["date"][:10] >= cutoff and coverage_start and pts[0]["date"][:10] > coverage_start \
+                    and not _is_country_or_state(label):
                 new_regions.append({"label": label, "since": pts[0]["date"][:10], "count": pts[-1]["employee_count"]})
         job_countries = {}
         for ctry, n in (out["jobs"].get(p.id, {}).get("by_country") or {}).items():

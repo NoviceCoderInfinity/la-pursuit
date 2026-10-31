@@ -18,33 +18,45 @@ async def enrich_peers(cands: list[Candidate], client: CrustClient, tracer: Trac
     tracer.start("enrich", f"Enriching {len(cands)} peers (batched)")
     companies: dict[int, dict[str, Any]] = {}
     ev_by_id: dict[int, str] = {}
-    by_domain = {c.domain: c for c in cands if c.domain}
+    by_domain = {c.domain.lower(): c for c in cands if c.domain}
     domains = list(by_domain)
+    rows: list[tuple[dict[str, Any], str]] = []
     for i in range(0, len(domains), BATCH):
         chunk = domains[i:i + BATCH]
         try:
             data, ev = await client.enrich(chunk, ENRICH_FIELDS, label=f"enrich batch {i // BATCH + 1}: {', '.join(chunk)}")
+            rows += [(r, ev) for r in data or []]
         except CrustError as e:
             tracer.decide("retry", f"enrich batch {i // BATCH + 1}", f"{e.message[:120]}; splitting the batch into single-company calls")
-            data = []
             for d in chunk:
                 try:
-                    one, ev = await client.enrich([d], ENRICH_FIELDS, label=f"enrich {d}")
-                    data += one or []
+                    one, ev1 = await client.enrich([d], ENRICH_FIELDS, label=f"enrich {d}")
+                    rows += [(r, ev1) for r in one or []]
                 except CrustError as e2:
                     tracer.decide("degrade", d, f"{e2.message[:120]}; keeps search-level data only")
-            if not data:
-                continue
-        for row in data or []:
-            ms = row.get("matches") or []
-            if not ms:
-                tracer.decide("degrade", row.get("matched_on", "?"), "no enrichment returned")
-                continue
-            cd = ms[0].get("company_data", {})
-            cid = cd.get("crustdata_company_id")
-            if cid:
-                companies[cid] = cd
-                ev_by_id[cid] = ev
+    # candidates without a domain are enriched by id
+    no_dom = [c for c in cands if not c.domain and c.company_id]
+    if no_dom:
+        try:
+            data, ev = await client.enrich_ids([c.company_id for c in no_dom], ENRICH_FIELDS, label=f"enrich {len(no_dom)} peers by id")  # type: ignore[misc]
+            rows += [(r, ev) for r in data or []]
+        except CrustError as e:
+            tracer.decide("degrade", "enrich by id", e.message[:120])
+    for row, ev in rows:
+        ms = row.get("matches") or []
+        if not ms:
+            tracer.decide("degrade", str(row.get("matched_on", "?")), "no enrichment returned")
+            continue
+        cd = ms[0].get("company_data", {})
+        cid = cd.get("crustdata_company_id")
+        # map back to the candidate we asked for (by domain), so the peer id stays canonical
+        asked = by_domain.get(str(row.get("matched_on", "")).lower())
+        if asked and asked.company_id and asked.company_id != cid:
+            tracer.decide("disambiguate", asked.name, f"enrich returned id {cid} for {asked.domain}; keeping candidate id {asked.company_id}", ev=[ev])
+            cid = asked.company_id
+        if cid:
+            companies[cid] = cd
+            ev_by_id[cid] = ev
     peers: list[Peer] = []
     disputes: list[Dispute] = []
     for c in cands:

@@ -69,10 +69,21 @@ class Run:
             self.error = f"{type(e).__name__}: {e}"
             t.emit("error", "Run failed", detail={"error": self.error})
             return self._finish()
+        finally:
+            if not self.done:
+                try:
+                    self.credits_end = await self.client.credits()
+                except Exception:  # noqa: BLE001
+                    pass
+                self._finish()
 
     def _finish(self) -> "Run":
+        if self.done:
+            return self
         self.done = True
-        asyncio.get_event_loop().create_task(self._close()) if False else None
+        if not self.peers and not self.error:
+            self.error = "No peers could be qualified for this request"
+            self.tracer.emit("error", self.error, detail={"hint": "try a market description or a company domain"})
         self.tracer.emit("done", "Run complete", detail={"ledger": len(self.ledger), "peers": len(self.peers)})
         self.tracer.close()
         return self

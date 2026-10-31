@@ -52,7 +52,8 @@ async def events(run_id: str):
 
     async def gen():
         async for e in run.tracer.subscribe():
-            yield {"data": e.model_dump_json()}
+            # ensure_ascii: U+2028/U+2029 and friends inside company text must not break line-based SSE clients
+            yield {"data": json.dumps(e.model_dump(), ensure_ascii=True, default=str)}
             if e.type == "done":
                 return
     return EventSourceResponse(gen(), ping=15)

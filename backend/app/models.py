@@ -17,6 +17,7 @@ class Intent(BaseModel):
     seed_domain: str | None = Field(default=None, description="Domain of that company if the input contains one")
     keywords: list[str] = Field(default_factory=list, description="3-8 search keywords for the market")
     geo: str | None = Field(default=None, description="Country or region if the input restricts geography")
+    segment: str | None = Field(default=None, description="Target customer segment named in an idea ('for dental clinics')")
     lens: Lens
     rationale: str = Field(description="One short sentence on why this kind and lens")
 

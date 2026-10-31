@@ -111,7 +111,7 @@ function Shell() {
             </div>
           )}
 
-          {ready.length === 0 && <Waiting />}
+          {ready.length === 0 && (run.status === "done" ? <NothingFound /> : <Waiting />)}
 
           {SCENES.map((s) => {
             const data = run.scenes[s.key];
@@ -131,6 +131,20 @@ function Shell() {
             </footer>
           )}
         </main>
+      </div>
+    </div>
+  );
+}
+
+function NothingFound() {
+  const { trace, query } = useRun();
+  const err = [...trace].reverse().find((e) => e.type === "error");
+  return (
+    <div className="dots grid min-h-[60vh] place-items-center px-6">
+      <div className="max-w-[520px] text-center">
+        <div className="font-dot text-[56px] font-black leading-none text-muted">∅</div>
+        <div className="mt-6 text-[28px] font-semibold tracking-tight">Nothing on the graph for “{query}”.</div>
+        <div className="mt-3 text-[14px] text-muted">{err?.label ?? "No peers could be qualified."} Try a company domain or a market description.</div>
       </div>
     </div>
   );

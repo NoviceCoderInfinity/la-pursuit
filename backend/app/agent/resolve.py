@@ -39,6 +39,16 @@ async def resolve_seed(intent: Intent, query: str, client: CrustClient, tracer: 
         return None
     cands = [_cand_from_match(m, "seed", ev) for m in matches]
     scored = score_matches(matches, cands, intent.seed_company_name or "", query + " " + intent.market_description)
+    top_score, top_conf = scored[0][0], scored[0][2]
+    exact = _exact_name(scored[0][1].name, intent.seed_company_name or "")
+    if top_conf < 0.5 and not exact or (top_conf < 0.8 and not exact and top_score < 1.5):
+        tracer.decide("degrade", intent.seed_company_name or "?",
+                      f"best identify match is {scored[0][1].name} ({scored[0][1].domain}) at only {top_conf:.2f} confidence with a different name; "
+                      f"treating the request as a market query instead", ev=[ev])
+        intent.kind, intent.seed_company_name, intent.seed_domain = "market", None, None
+        intent.market_description = query.strip(" .?!")
+        tracer.done("resolve", "No confident match; continuing as a market search")
+        return None
     best = scored[0][1]
     best.status, best.reason = "accepted", f"best match (confidence {scored[0][2]:.2f}, score {scored[0][0]:.2f})"
     if len(scored) > 1:
@@ -48,6 +58,11 @@ async def resolve_seed(intent: Intent, query: str, client: CrustClient, tracer: 
                       f"with the request and company size; rejected: {alts}", ev=[ev])
     tracer.done("resolve", f"{best.name} · {best.domain} · id {best.company_id}", company_id=best.company_id)
     return best
+
+
+def _exact_name(cand: str | None, seed: str) -> bool:
+    strip = lambda x: [t for t in (x or "").lower().replace(".", " ").split() if t not in TLD_WORDS and t not in {"inc", "ltd", "llc", "co", "the"}]
+    return bool(seed) and strip(cand) == strip(seed)
 
 
 def score_matches(matches: list[dict[str, Any]], cands: list[Candidate], seed_name: str, context: str
@@ -71,6 +86,9 @@ def score_matches(matches: list[dict[str, Any]], cands: list[Candidate], seed_na
         for t in seed_toks & TLD_WORDS:
             if dom.endswith("." + t) or dom.replace(".", "").endswith(t):
                 tld_hint = 0.8
+        glued = seed_name.lower().replace(" ", "")
+        if glued.endswith("ai") and len(glued) > 4 and dom in (f"{glued[:-2]}.ai", f"{glued}.ai", f"{glued}.com", f"{glued}.io"):
+            tld_hint = 0.8  # "PolyAI" -> poly.ai, "ConnexAI" -> connex.ai
         # 3. tech context in the request favours software/tech industries
         inds = " ".join(b.get("industries") or [])
         tech = 0.3 if tech_ctx and ("Software" in inds or "Technology" in inds or "Internet" in inds) else 0.0
@@ -78,7 +96,9 @@ def score_matches(matches: list[dict[str, Any]], cands: list[Candidate], seed_na
         ctx = overlap(" ".join(t for t in tokens(context) if t not in seed_toks), c.description)
         size_rank = _range_rank(b.get("employee_count_range"))
         services = -0.5 if SERVICES_HINT.search(c.description or "") and not SERVICES_HINT.search(context) else 0.0
-        score = conf + name_score + tld_hint + tech + 0.9 * ctx + 0.12 * size_rank + services
+        no_domain = -0.6 if not dom else 0.0
+        no_desc = -0.2 if not (c.description or "").strip() else 0.0
+        score = conf + name_score + tld_hint + tech + 0.9 * ctx + 0.12 * size_rank + services + no_domain + no_desc
         scored.append((score, c, conf))
     scored.sort(key=lambda t: t[0], reverse=True)
     return scored

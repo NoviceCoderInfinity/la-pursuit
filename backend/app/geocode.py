@@ -74,9 +74,13 @@ def normalize(raw: str, country_hint: str | None = None) -> tuple[str, str | Non
     if len(parts) >= 2 and parts[1].upper() in US_STATES:
         country = "United States"
         parts = [parts[0], parts[1].upper(), "United States"]
-    if country is None and country_hint:
-        country = ISO3.get(country_hint, country_hint)
-        parts.append(country)
+    if country is None and len(parts) == 2 and len(parts[1]) == 2 and parts[1].upper() not in US_STATES:
+        return ", ".join(parts), None  # "Toronto, ON": leave it alone, skip the country sanity check
+    if country is None and country_hint and len(parts) == 1:
+        name = ISO3.get(country_hint) or (country_hint if country_hint in COUNTRY_CENTROID else None)
+        if name:
+            country = name
+            parts.append(country)
     return ", ".join(parts), country
 
 
@@ -89,21 +93,26 @@ async def geocode(raw: str, country_hint: str | None = None) -> dict[str, Any] |
     if city in GAZ:
         lat, lng = GAZ[city]
         return {"lat": lat, "lng": lng, "label": q, "source": "gazetteer"}
-    if city in COUNTRY_CENTROID:
-        lat, lng = COUNTRY_CENTROID[city]
-        return {"lat": lat, "lng": lng, "label": city, "source": "country"}
+    if city in _CC:
+        lat, lng = _CC[city]
+        return {"lat": lat, "lng": lng, "label": q.split(",")[0].strip(), "source": "country"}
     key = "nom:" + q.lower()
     if key in _cache:
         return _cache[key]
-    hit = await _nominatim(q, country)
+    hit, completed = await _nominatim(q, country)
     if hit is None and country:
         lat, lng = COUNTRY_CENTROID.get(country, (None, None))
         hit = {"lat": lat, "lng": lng, "label": country, "source": "country-fallback"} if lat is not None else None
-    _cache.set(key, hit, expire=90 * 24 * 3600)
+    # cache real answers for 90 days; transient failures only briefly
+    _cache.set(key, hit, expire=90 * 24 * 3600 if completed and hit and hit["source"] == "nominatim" else 3600)
     return hit
 
 
-async def _nominatim(q: str, country: str | None) -> dict[str, Any] | None:
+_CC = {k.lower(): v for k, v in COUNTRY_CENTROID.items()}
+
+
+async def _nominatim(q: str, country: str | None) -> tuple[dict[str, Any] | None, bool]:
+    """Returns (hit, completed). completed=False means a transient failure, not 'no such place'."""
     global _last
     async with _lock:
         wait = _last + 1.05 - time.monotonic()
@@ -114,13 +123,15 @@ async def _nominatim(q: str, country: str | None) -> dict[str, Any] | None:
             async with httpx.AsyncClient(timeout=15.0, headers={"User-Agent": UA}) as h:
                 r = await h.get("https://nominatim.openstreetmap.org/search",
                                 params={"format": "json", "limit": 1, "q": q, "addressdetails": 1})
-                rows = r.json() if r.status_code == 200 else []
+                if r.status_code != 200:
+                    return None, False
+                rows = r.json()
         except Exception:
-            rows = []
+            return None, False
     if not rows:
-        return None
+        return None, True
     row = rows[0]
     found_country = (row.get("address") or {}).get("country")
     if country and found_country and country.lower() not in found_country.lower() and found_country.lower() not in country.lower():
-        return None  # sanity check: wrong country
-    return {"lat": float(row["lat"]), "lng": float(row["lon"]), "label": row.get("display_name", q)[:80], "source": "nominatim"}
+        return None, True  # sanity check: wrong country
+    return {"lat": float(row["lat"]), "lng": float(row["lon"]), "label": row.get("display_name", q)[:80], "source": "nominatim"}, True

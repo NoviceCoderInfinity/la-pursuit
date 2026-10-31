@@ -230,6 +230,15 @@ def _talent(peers: list[Peer], companies: dict[int, dict[str, Any]], signals: di
             "total_profiles": signals.get("moves_total", 0)}
 
 
+def _names(raw: Any) -> list[str]:
+    """Investor lists arrive as lists or comma-separated strings; never iterate a string's characters."""
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        return [s.strip() for s in raw.split(",") if s.strip()]
+    return [str(n).strip() for n in raw if isinstance(n, (str, int)) and str(n).strip()]
+
+
 def _capital(peers: list[Peer], companies: dict[int, dict[str, Any]], per: dict[int, dict[str, Any]]) -> dict[str, Any]:
     inv_peers: dict[str, set[int]] = {}
     inv_meta: dict[str, dict[str, Any]] = {}
@@ -240,7 +249,7 @@ def _capital(peers: list[Peer], companies: dict[int, dict[str, Any]], per: dict[
         if not cd:
             continue
         fund = cd.get("funding") or {}
-        names = fund.get("investors") or [n.get("name") for n in (fund.get("investors_detailed") or []) if n.get("name")]
+        names = _names(fund.get("investors")) or [n.get("name") for n in (fund.get("investors_detailed") or []) if n.get("name")]
         for det in fund.get("investors_detailed") or []:
             if det.get("name"):
                 inv_meta[det["name"]] = {"categories": det.get("categories") or [], "url": det.get("crunchbase_profile_url")}
@@ -249,7 +258,7 @@ def _capital(peers: list[Peer], companies: dict[int, dict[str, Any]], per: dict[
         for ms in fund.get("milestones") or []:
             if ms.get("is_fund"):
                 continue
-            leads = ms.get("lead_investors") or ms.get("investors") or []
+            leads = _names(ms.get("lead_investors")) or _names(ms.get("investors"))
             d = (ms.get("funding_date") or ms.get("date") or "")[:10]
             for name in (leads if leads else names[:1]):
                 edges.append({"from": f"inv:{name}", "to": f"co:{p.id}", "date": d or None, "amount_usd": ms.get("amount_usd"),
