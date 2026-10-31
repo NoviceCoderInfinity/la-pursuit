@@ -48,6 +48,9 @@ async def resolve_seed(intent: Intent, query: str, client: CrustClient, tracer: 
         tracer.done("resolve", f"Could not resolve “{intent.seed_company_name}” on the identity graph")
         return None
     best = scored[0][1]
+    seed_name = (intent.seed_company_name or "").strip()
+    seed_toks = tokens(seed_name) | {t for t in seed_name.lower().split() if t in TLD_WORDS}
+    core = [t for t in seed_name.lower().replace(".", " ").split() if t not in TLD_WORDS and t not in {"inc", "ltd", "llc", "co", "the"}]
     # Sanity: a same-named record whose domain doesn't carry the name and whose description shares
     # nothing with the request ("Zzz" → troutman.com, a law firm) is not the company the user meant.
     dom_root = re.sub(r"[^a-z0-9]", "", (best.domain or "").split(".")[0].lower())
