@@ -78,7 +78,7 @@ def score_matches(matches: list[dict[str, Any]], cands: list[Candidate], seed_na
         ctx = overlap(" ".join(t for t in tokens(context) if t not in seed_toks), c.description)
         size_rank = _range_rank(b.get("employee_count_range"))
         services = -0.5 if SERVICES_HINT.search(c.description or "") and not SERVICES_HINT.search(context) else 0.0
-        score = conf + name_score + tld_hint + tech + 0.9 * ctx + 0.08 * size_rank + services
+        score = conf + name_score + tld_hint + tech + 0.9 * ctx + 0.12 * size_rank + services
         scored.append((score, c, conf))
     scored.sort(key=lambda t: t[0], reverse=True)
     return scored
