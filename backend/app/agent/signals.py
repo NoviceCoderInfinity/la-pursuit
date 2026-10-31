@@ -194,17 +194,38 @@ async def collect_signals(peers: list[Peer], companies: dict[int, dict[str, Any]
         out["geo"][p.id] = {"hq": hq, "regions": regions, "unplaced": unplaced, "new_regions": new_regions,
                             "job_countries": job_countries, "timeline": _region_timeline(series)}
 
-    # ---- seed homepage (claims) for the investor lens --------------------------------------------
+    # ---- target's own claims: homepage + about + pricing, plus Google-rendered snippets of its site ----
     target = next((p for p in peers if p.id == seed_id), None) if seed_id else None
     if target or peers:
         tp = target or max((p for p in peers if p.id in companies), key=lambda p: (p.raised_usd or 0, p.headcount or 0), default=peers[0])
-        url = tp.website or f"https://{tp.domain}"
+        base = (tp.website or f"https://{tp.domain}").rstrip("/")
+        if "://" not in base:
+            base = "https://" + base
+        urls = [base, base + "/about", base + "/pricing", base + "/customers", base + "/careers"]
+        texts: list[str] = []
+        evs: list[str] = []
         try:
-            data, ev = await client.web_fetch([url], label=f"web/fetch {tp.name} homepage (claims)")
-            html = (data[0].get("content") or "") if data else ""
-            out["claims_source"] = {"peer_id": tp.id, "url": url, "text": _html_to_text(html)[:20000], "ev": ev}
+            data, ev = await client.web_fetch(urls, label=f"web/fetch {tp.name} site (home, about, pricing, customers, careers)")
+            evs.append(ev)
+            for row in data or []:
+                if row.get("success") and row.get("content"):
+                    texts.append(f"[{row.get('url')}] " + _html_to_text(row["content"])[:12000])
         except CrustError as e:
-            tracer.decide("degrade", "homepage fetch", e.message)
+            tracer.decide("degrade", "site fetch", e.message)
+        try:  # rendered snippets help when the site is a JS app
+            sq, ev2 = await client.web_search(f"{tp.name} raised funding employees customers founded headquarters hiring",
+                                              sources=["web"], label=f"web/search site:{tp.domain} rendered snippets")
+            evs.append(ev2)
+            snips = [f"{r.get('title') or ''}. {r.get('snippet') or ''}" for r in sq.get("results", [])
+                     if tp.domain and tp.domain in (r.get("url") or "")]
+            if snips:
+                texts.append("[search snippets] " + " ".join(snips)[:6000])
+        except CrustError as e:
+            tracer.decide("degrade", "site snippets", e.message)
+        if texts:
+            out["claims_source"] = {"peer_id": tp.id, "url": base, "text": "\n".join(texts)[:40000], "ev": evs[0], "evs": evs,
+                                    "pages": len(texts)}
+            tracer.emit("note", f"Collected {len(texts)} text sources from {tp.name}'s site for claim checking", ev=evs)
 
     tracer.done("signals", f"jobs for {len(out['jobs'])} peers · {len(out['moves'])} talent moves · "
                 f"{len(out['senior_joins'])} senior joins · {sum(len(v['kept']) for v in out['news'].values())} relevant news items",

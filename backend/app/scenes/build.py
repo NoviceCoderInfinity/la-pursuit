@@ -196,48 +196,90 @@ def claims(run: "Run") -> list[dict[str, Any]]:
     if not src:
         return []
     pid, text, ev = src["peer_id"], src["text"], src["ev"]
+    evs = src.get("evs") or [ev]
     cd = run.companies.get(pid) or {}
     p = _peer_index(run)[pid]
     fund = cd.get("funding") or {}
+    loc = cd.get("locations") or {}
+    hiring = cd.get("hiring") or {}
+    invs = [i.lower() for i in (fund.get("investors") or [])]
+    amts = [x.get("amount_usd") or 0 for x in fund.get("milestones") or []]
+    tot, last = fund.get("total_investment_usd") or 0, fund.get("last_round_amount_usd") or 0
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    def add(claim: str, status: str, note: str, evs: list[str]) -> None:
-        if claim in seen or len(out) >= 10:
+    def add(claim: str, status: str, note: str, extra: list[str]) -> None:
+        key = re.sub(r"\W+", " ", claim.lower()).strip()
+        if key in seen or len(out) >= 12:
             return
-        seen.add(claim)
-        out.append({"peer_id": pid, "claim": claim, "status": status, "note": note, "ev": [ev] + evs})
+        seen.add(key)
+        out.append({"peer_id": pid, "claim": claim.strip(), "status": status, "note": note, "ev": evs + extra})
 
-    for m in re.finditer(NUM + r"\s+(employees|people on the team|team members)", text, re.I):
+    def near(v: float, targets: list[float], tol: float = 0.25) -> bool:
+        return any(t and abs(v - t) <= tol * max(v, t) for t in targets)
+
+    # headquarters / based in
+    for m in re.finditer(r"\b(?:headquartered|based|located)\s+in\s+([A-Z][A-Za-z.]+(?:\s[A-Z][A-Za-z.]+){0,2})", text):
+        city = m.group(1).strip(".")
+        hq = " ".join(x for x in [loc.get("city"), loc.get("state"), loc.get("country"), loc.get("headquarters")] if x)
+        ok = bool(hq) and city.split()[0].lower() in hq.lower()
+        add(m.group(0), "verified" if ok else ("contradicted" if hq else "unverifiable"), f"graph HQ: {loc.get('headquarters') or hq or 'unknown'}", p.ev[:1])
+    # hiring
+    if re.search(r"\b(we(?:'|’)re|we are)\s+hiring\b|\bjoin (?:our|the) team\b|\bopen (?:roles|positions)\b", text, re.I):
+        n = hiring.get("openings_count")
+        j90 = (run.signals.get("jobs", {}).get(pid) or {}).get("total_90d")
+        ok = (n or 0) > 0 or (j90 or 0) > 0
+        add("we're hiring", "verified" if ok else ("contradicted" if n is not None else "unverifiable"),
+            f"graph: {n if n is not None else '?'} open roles, {j90 if j90 is not None else '?'} added in 90 days", p.ev[:1])
+    # team size
+    for m in re.finditer(r"(?:team of|we have|we are|we're|our team of|employs?|employing|more than|over|with)\s+" + NUM + r"\s+(employees|people on the team|team members|teammates|engineers|people)", text, re.I):
         v = _num(m.group(1), m.group(2))
         hc = p.headcount or 0
-        ok = hc and abs(v - hc) <= 0.4 * max(v, hc)
-        add(m.group(0).strip(), "verified" if ok else "contradicted", f"graph headcount is {hc}", p.ev[:1])
-    for m in re.finditer(r"(?:raised|funding of|secured)\s+\$" + NUM, text, re.I):
-        v = _num(m.group(1), m.group(2))
-        tot, last = fund.get("total_investment_usd") or 0, fund.get("last_round_amount_usd") or 0
-        ok = any(abs(v - x) <= 0.25 * max(v, x) for x in (tot, last) if x)
-        add(m.group(0).strip(), "verified" if ok else ("contradicted" if tot else "unverifiable"),
-            f"graph: total raised ${tot/1e6:.1f}M, last round ${last/1e6:.1f}M", p.ev[1:2])
-    for m in re.finditer(r"\$" + NUM + r"\s+(?:series\s+[a-d]|seed|round)", text, re.I):
-        v = _num(m.group(1), m.group(2))
-        amts = [x.get("amount_usd") or 0 for x in fund.get("milestones") or []]
-        ok = any(abs(v - x) <= 0.25 * max(v, x) for x in amts if x)
-        add(m.group(0).strip(), "verified" if ok else ("contradicted" if amts else "unverifiable"),
-            "matches a funding milestone on the graph" if ok else f"graph rounds: {', '.join(f'${a/1e6:.0f}M' for a in amts if a) or 'none'}", p.ev[1:2])
-    for m in re.finditer(r"backed by ([A-Z][\w&'.\- ]{2,40}(?:,\s*[A-Z][\w&'.\- ]{2,40}){0,5})", text):
-        names = [n.strip() for n in m.group(1).split(",")]
-        invs = [i.lower() for i in (fund.get("investors") or [])]
-        for n in names[:4]:
+        role = m.group(3).lower()
+        if role == "engineers":
+            eng = ((cd.get("headcount") or {}).get("by_role_absolute") or {}).get("Engineering")
+            ok = bool(eng) and near(v, [eng], 0.4)
+            add(m.group(0), "verified" if ok else ("contradicted" if eng else "unverifiable"), f"graph engineering headcount: {eng}", p.ev[:1])
+        else:
+            ok = bool(hc) and near(v, [hc], 0.4)
+            add(m.group(0), "verified" if ok else ("contradicted" if hc else "unverifiable"), f"graph headcount: {hc}", p.ev[:1])
+    # funding amounts in either order
+    pats = [r"(?:raised|funding of|secured|closed|announc(?:ed|ing))\s+(?:a\s+|an\s+|our\s+)?(?:\$" + NUM + r")",
+            r"\$" + NUM + r"\s+(?:in\s+)?(?:series\s+[a-d]|seed|funding|round)",
+            r"(?:series\s+[a-d]|seed)\s+(?:round\s+)?(?:of\s+)?\$" + NUM]
+    for pat in pats:
+        for m in re.finditer(pat, text, re.I):
+            v = _num(m.group(1), m.group(2))
+            if v < 1e5:
+                continue
+            ok = near(v, amts + [tot, last])
+            add(m.group(0), "verified" if ok else ("contradicted" if (amts or tot) else "unverifiable"),
+                f"graph: rounds {', '.join(f'${a/1e6:.0f}M' for a in amts if a) or 'none'}; total ${tot/1e6:.0f}M", p.ev[1:2])
+    # investors
+    for m in re.finditer(r"(?:backed by|investors include|funded by|investors like|from investors (?:including|like|such as))\s+([A-Z][\w&'.\- ]{2,40}(?:,\s*(?:and\s+)?[A-Z][\w&'.\- ]{2,40}){0,6})", text):
+        for n in [x.strip(" .") for x in re.split(r",|\band\b", m.group(1)) if x.strip(" .")][:5]:
             hit = any(n.lower().split()[0] in i for i in invs)
             add(f"backed by {n}", "verified" if hit else ("contradicted" if invs else "unverifiable"),
-                "investor is on the graph's investor list" if hit else "not in the graph's investor list", p.ev[1:2])
-    for m in re.finditer(r"founded in (20\d\d|19\d\d)", text, re.I):
+                "on the graph's investor list" if hit else f"not among {len(invs)} investors on the graph", p.ev[1:2])
+    if re.search(r"\bY ?Combinator\b|\bYC\s?[WS]\d\d\b", text) and "y combinator" not in [c["claim"].lower().replace("backed by ", "") for c in out]:
+        hit = any("y combinator" in i for i in invs)
+        add("Y Combinator company", "verified" if hit else ("contradicted" if invs else "unverifiable"), "YC on investor list" if hit else "YC not on investor list", p.ev[1:2])
+    # founded
+    for m in re.finditer(r"(?:founded|established|started)\s+in\s+((?:19|20)\d\d)", text, re.I):
         y = int(m.group(1))
         add(m.group(0), "verified" if p.founded == y else ("contradicted" if p.founded else "unverifiable"), f"graph year founded: {p.founded}", p.ev[:1])
-    for m in re.finditer(NUM + r"\s+(customers|businesses|companies|enterprises|users|developers|calls|conversations|minutes|countries|languages|integrations)\b", text, re.I):
-        add(m.group(0).strip(), "unverifiable", "no identity-graph field measures this; would need customer data", [])
-    return out
+    # scale claims the graph cannot measure: keep the largest figure per unit so pricing tiers don't flood the list
+    best: dict[str, tuple[float, str]] = {}
+    for m in re.finditer(NUM + r"\s+(customers|businesses|companies|enterprises|users|developers|calls|conversations|minutes|countries|languages|integrations|agents deployed)\b", text, re.I):
+        v, unit = _num(m.group(1), m.group(2)), m.group(3).lower()
+        if v >= 10 and (unit not in best or v > best[unit][0]):
+            best[unit] = (v, m.group(0))
+    for unit, (v, claim) in best.items():
+        add(claim, "unverifiable", "no identity-graph field measures this", [])
+    # order: contradicted, verified, unverifiable
+    rank = {"contradicted": 0, "verified": 1, "unverifiable": 2}
+    out.sort(key=lambda c: rank[c["status"]])
+    return out[:10]
 
 
 def truth(run: "Run") -> dict[str, Any]:
