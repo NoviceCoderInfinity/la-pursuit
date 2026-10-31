@@ -52,7 +52,8 @@ async def events(run_id: str):
 
     async def gen():
         async for e in run.tracer.subscribe():
-            yield {"data": e.model_dump_json()}
+            # ensure_ascii: U+2028/U+2029 and friends inside company text must not break line-based SSE clients
+            yield {"data": json.dumps(e.model_dump(), ensure_ascii=True, default=str)}
             if e.type == "done":
                 return
     return EventSourceResponse(gen(), ping=15)
@@ -89,6 +90,32 @@ async def set_lens(run_id: str, body: LensIn) -> dict[str, Any]:
     deck["watches"] = (run.scenes.get("deck") or {}).get("watches", [])
     run.scenes["deck"] = deck
     return deck
+
+
+@app.get("/api/run/{run_id}/watch")
+async def watch_status(run_id: str) -> list[dict[str, Any]]:
+    """Live status of the watches this run registered: the watch object + its runs (baseline first)."""
+    run = _get(run_id)
+    out: list[dict[str, Any]] = []
+    for w in (run.scenes.get("deck") or {}).get("watches", []):
+        wid = w.get("id")
+        if not wid or wid == "preview":
+            out.append({**w, "runs": []})
+            continue
+        base = f"/watch/company/search/{wid}" if w.get("kind") == "discovery" else f"/watch/company/{wid}"
+        try:
+            obj, ev1 = await run.client.call("GET", base, None, label=f"watch status #{wid}", cacheable=False)
+            runs, ev2 = await run.client.call("GET", f"/watch/company/{wid}/runs", None, label=f"watch runs #{wid}", cacheable=False)
+            out.append({**w, "status": obj.get("status", w.get("status")), "last_run_at": obj.get("last_run_at"),
+                        "notifications_count": obj.get("notifications_count"), "credits_consumed": obj.get("credits_consumed"),
+                        "runs": [{"id": r.get("id"), "status": r.get("status"), "started_at": r.get("started_at"), "completed_at": r.get("completed_at"),
+                                  "records_searched": r.get("records_searched"), "records_matched": r.get("records_matched"),
+                                  "new_records_count": r.get("new_records_count"), "credits_deducted": r.get("credits_deducted")}
+                                 for r in (runs.get("runs") or [])],
+                        "ev": (w.get("ev") or []) + [ev1, ev2]})
+        except Exception as e:  # noqa: BLE001
+            out.append({**w, "runs": [], "error": str(e)[:160]})
+    return out
 
 
 @app.get("/api/credits")

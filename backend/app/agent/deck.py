@@ -40,7 +40,7 @@ def build_deck(run: "Run", lens: str) -> dict[str, Any]:
     per, talent, cap = run.engines["per_peer"], run.engines["talent"], run.engines["capital"]
     pidx = {p.id: p for p in run.peers}
     ranked = sorted((p for p in run.peers if p.id in per and per[p.id]["momentum"] is not None), key=lambda p: -per[p.id]["momentum"])
-    seed = next((p for p in run.peers if p.is_seed and p.id in per), None)
+    seed = next((p for p in run.peers if p.is_seed and p.id in per and per[p.id].get("momentum") is not None), None)
     target = seed or (ranked[0] if ranked else None)
     moves: list[dict[str, Any]] = []
 
@@ -58,9 +58,9 @@ def build_deck(run: "Run", lens: str) -> dict[str, Any]:
         rank = next((i + 1 for i, p in enumerate(ranked) if p.id == target.id), None)
         pull_txt = f"organic pull {m['pull']:.0f}/100" if m.get("pull") is not None else "organic pull unknown"
         verdict = "Strong — dig in" if (m["momentum"] or 0) >= 70 and (m["distress"] or 0) < 30 else ("Pass for now" if (m["distress"] or 0) >= 40 else "Dig deeper")
-        mv(f"{verdict}: {target.name} ranks #{rank} of {len(ranked)} on momentum",
-           f"Momentum {m['momentum']:.0f}/100 (headcount {m['hc_growth_6m'] or 0:+.0f}% in 6 months, traffic {m['traffic_qoq'] or 0:+.0f}% QoQ, "
-           f"last round {m['last_round'] or 'n/a'} {m['last_round_date'] or ''}); {pull_txt}; distress {m['distress']:.0f}/100.",
+        mv(f"{verdict}: {target.name} ranks #{rank or '?'} of {len(ranked)} on momentum",
+           f"Momentum {m['momentum'] or 0:.0f}/100 (headcount {m['hc_growth_6m'] or 0:+.0f}% in 6 months, traffic {m['traffic_qoq'] or 0:+.0f}% QoQ, "
+           f"last round {m['last_round'] or 'n/a'} {m['last_round_date'] or ''}); {pull_txt}; distress {m['distress'] or 0:.0f}/100.",
            0.8 if rank else 0.5, [m.get("ev")] + target.ev, "field", _people_links(run, target.id))
         if ranked:
             rival = next((p for p in ranked if p.id != target.id), None)
@@ -175,7 +175,11 @@ async def register_watches(run: "Run") -> list[dict[str, Any]]:
     except CrustError as e:
         t.decide("degrade", "entity watch", e.message)
     # discovery watch: new entrants matching the market definition
-    kw = [k for k in (run.intent.keywords if run.intent else []) if len(k) > 3][:2]
+    # keywords from the market definition, never the raw query (a company query would yield its own name)
+    from app.textutil import tokens
+    seed_name = {t for t in tokens(run.seed.name)} if run.seed else set()
+    kw = [k for k in sorted(tokens(run.intent.market_description if run.intent else ""), key=len, reverse=True)
+          if len(k) > 3 and k not in seed_name][:2]
     if kw:
         dbody = {"filters": {"op": "and", "conditions": [{"field": "basic_info.description", "type": "(.)", "value": " ".join(kw)},
                                                           {"field": "headcount.total", "type": "=>", "value": 10}]},
@@ -191,5 +195,5 @@ async def register_watches(run: "Run") -> list[dict[str, Any]]:
             out.append(rec)
         except CrustError as e:
             t.decide("degrade", "discovery watch", e.message)
-    t.done("watch", f"{sum(1 for w in out if w.get('id'))} watches live · {len(out)} configured", watches=len(out))
+    t.done("watch", f"{sum(1 for w in out if w.get('id') and w.get('id') != 'preview')} watches live · {len(out)} configured", watches=len(out))
     return out

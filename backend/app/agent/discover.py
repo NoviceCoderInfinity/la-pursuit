@@ -51,6 +51,8 @@ class Discovery:
             self.core = terms(self.intent.market_description)
         else:
             self.core = terms(self.query) or terms(self.intent.market_description)
+        if not self.core:  # "AI software startups" is all stop words: fall back to the raw words
+            self.core = {w for w in re.findall(r"[a-z0-9]+", (self.query or self.intent.market_description).lower()) if len(w) > 1}
         self.wide = (terms(self.intent.market_description) | terms(self.keywords)) - self.core
         # A place says where, not what: "india" alone must not qualify a 10,000-person conglomerate.
         self.geo = terms(self.intent.geo)
@@ -136,6 +138,27 @@ class Discovery:
         self.tracer.emit("note", f"Web mentions to verify on the graph: {', '.join(names[:12])}", ev=[ev])
         await self._resolve_web_names(names[:12], ev)
 
+    def _score_pick(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        """Shared identify-match scorer (resolve.score_matches) for a web-mentioned name."""
+        from app.agent.resolve import _cand_from_match, score_matches
+        ms = [m for m in (row.get("matches") or []) if float(m.get("confidence_score") or 0) >= 0.6]
+        if not ms:
+            return None
+        if row.get("match_type") == "domain":
+            return ms[0].get("company_data")
+        cands = [_cand_from_match(m, "web", "") for m in ms]
+        scored = score_matches(ms, cands, row.get("matched_on") or "", self.intent.market_description + " " + self.keywords)
+        best_score, c, conf = scored[0]
+        if conf < 0.8 and best_score < 2.0:
+            return None
+        # A web mention is a name: "VoIP" must not become "Universal Voip" just because the description fits.
+        if _norm_name(c.name) != _norm_name(row.get("matched_on")):
+            return None
+        if len(scored) > 1 and scored[1][0] > best_score - 0.3:
+            self.tracer.decide("disambiguate", row.get("matched_on") or c.name,
+                               f"chose {c.name} ({c.domain}) over {scored[1][1].name} ({scored[1][1].domain}) by market-description overlap")
+        return ms[cands.index(c)].get("company_data")
+
     def _company_like(self, names: list[str]) -> list[str]:
         """Drop names that are just the market's own words ("Legal", "Law", "Lawyers") read as companies."""
         market = self.core | self.wide | self.geo
@@ -154,7 +177,7 @@ class Discovery:
                 self.tracer.decide("degrade", f"identify web {kind}", e.message)
                 continue
             rows += [(row, ev2) for row in idd or []]
-        picked = [(_pick_match(row), row, ev2) for row, ev2 in rows]
+        picked = [(self._score_pick(row), row, ev2) for row, ev2 in rows]
         # A bare name that resolves to nothing or a tiny namesake ("Synthflow" → synthflow.ink, 6 people)
         # usually means the real company sits on <name>.ai; check that in one batched call.
         weak = {f"{_norm_name(row.get('matched_on'))}.ai": row.get("matched_on") for cd, row, _ in picked
@@ -231,7 +254,8 @@ class Discovery:
         return n
 
     async def _from_search(self, round_no: int) -> int:
-        q = self.market if round_no == 1 else f"{self.intent.market_description} {self.keywords}"
+        seg = f" for {self.intent.segment}" if self.intent.segment else ""
+        q = (self.market + seg) if round_no == 1 else f"{self.intent.market_description}{seg} {self.keywords}"
         floor = {1: 10, 2: 5, 3: 3}[round_no]
         mode = "hybrid" if round_no < 3 else "semantic"
         conds: list[dict[str, Any]] = [{"field": "headcount.total", "type": "=>", "value": floor}]
@@ -323,6 +347,9 @@ class Discovery:
                     accepted.append((score, c))
             if len(accepted) >= settings.min_peers:
                 break
+            if rnd == 1 and not accepted and not any(self._qualify(c)[2] > 0 for c in self.candidates.values()):
+                t.decide("degrade", "peer search", "no candidate shares a single term with the request; widening would only add noise")
+                break
         accepted.sort(key=lambda s: s[0], reverse=True)
         if len(accepted) > settings.max_peers:
             dropped = accepted[settings.max_peers:]
@@ -364,6 +391,9 @@ def _extract_names(results: list[dict[str, Any]], exclude: set[str]) -> list[str
     import collections
     counts: collections.Counter[str] = collections.Counter()
     pat = re.compile(r"\b([A-Z][A-Za-z0-9]{2,}(?:\.(?:ai|io))?(?:\s+(?:AI|Labs|HQ))?)\b")
+    corpus = " ".join(f"{r.get('title') or ''} . {r.get('snippet') or ''}" for r in results)
+    # a word that also appears in lowercase somewhere is a common noun ("Dental", "Clinics", "India" vs "Retell")
+    lowercase_words = set(re.findall(r"(?<![A-Za-z])[a-z][a-z0-9]{2,}(?![A-Za-z])", corpus))
     for r in results:
         text = f"{r.get('title') or ''} . {r.get('snippet') or ''}"
         seen = set()
@@ -371,6 +401,11 @@ def _extract_names(results: list[dict[str, Any]], exclude: set[str]) -> list[str
             name = m.group(1).strip()
             base = name.split()[0]
             if base in COMMON or name.lower() in exclude or base.isupper() and len(base) <= 3:
+                continue
+            if len(name.split()) == 1 and base.lower() in lowercase_words:
+                continue
+            # sentence-initial single words are usually not names
+            if len(name.split()) == 1 and (m.start() == 0 or text[max(0, m.start() - 2):m.start()].strip() in (".", "!", "?", ":")):
                 continue
             if name not in seen:
                 seen.add(name)

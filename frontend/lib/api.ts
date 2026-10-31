@@ -79,6 +79,16 @@ export async function setLens(runId: string, lens: Lens, ctx: { query: string; l
   return json<DeckScene>(`/api/run/${runId}/lens`, { method: "POST", body: JSON.stringify({ lens }) });
 }
 
+export interface WatchStatus {
+  id: string; kind: "entity" | "discovery"; status: string; last_run_at?: string | null; notifications_count?: number | null;
+  runs: { id: number; status: string; started_at: string; completed_at: string | null; records_searched: number | null; records_matched: number | null; new_records_count: number | null }[];
+  ev?: string[];
+}
+export async function getWatchStatus(runId: string): Promise<WatchStatus[]> {
+  if (isMock(runId)) return [];
+  return json<WatchStatus[]>(`/api/run/${runId}/watch`);
+}
+
 export async function getCredits(): Promise<number | null> {
   try {
     return (await json<{ credits: number }>("/api/credits")).credits;

@@ -94,7 +94,7 @@ async def _talent(live: list[Peer], client: CrustClient, tracer: Tracer, out: di
     """Cross-peer moves (one query per peer so only cross-company moves come back) and senior joins."""
     ids = [p.id for p in live]
     peer_ids = set(ids)
-    if len(ids) < 2:
+    if not ids:
         return
 
     async def into(p: Peer) -> tuple[str | None, int, list[dict[str, Any]]]:
@@ -102,7 +102,7 @@ async def _talent(live: list[Peer], client: CrustClient, tracer: Tracer, out: di
         body: dict[str, Any] = {"filters": {"op": "and", "conditions": [
             {"field": "experience.employment_details.current.company_id", "type": "=", "value": p.id},
             {"field": "experience.employment_details.past.company_id", "type": "in", "value": others}]},
-            "fields": PERSON_FIELDS, "limit": 40}
+            "fields": PERSON_FIELDS, "limit": 30}
         try:
             data, ev = await client.search_people(body, label=f"person/search joined {p.name} from a peer")
         except CrustError as e:
@@ -139,7 +139,9 @@ async def _talent(live: list[Peer], client: CrustClient, tracer: Tracer, out: di
             return
         for pr in data.get("profiles", []):
             ed = (pr.get("experience") or {}).get("employment_details") or {}
-            cur = next((c for c in (ed.get("current") or []) if c.get("crustdata_company_id") in peer_ids), None)
+            cur = next((c for c in (ed.get("current") or []) if c.get("crustdata_company_id") in peer_ids
+                        and c.get("seniority_level") in ("CXO", "Vice President", "Director")
+                        and (c.get("start_date") or "") >= since6), None)
             if not cur:
                 continue
             past = sorted((ed.get("past") or []), key=lambda x: x.get("end_date") or "", reverse=True)
@@ -150,7 +152,9 @@ async def _talent(live: list[Peer], client: CrustClient, tracer: Tracer, out: di
                 "date": (cur.get("start_date") or "")[:10], "name": (pr.get("basic_profile") or {}).get("name"), "ev": ev})
         tracer.emit("note", f"{len(out['senior_joins'])} senior joins (CXO/VP/Director) across peers in 6 months", ev=[ev])
 
-    results, _ = await asyncio.gather(asyncio.gather(*(into(p) for p in live)), senior())
+    # Cross-peer moves need at least two peers; senior joins don't. The senior-joins query is the slowest
+    # single call (~20s), so it goes first: the /person/search gate releases calls in the order they queue.
+    _, results = await asyncio.gather(senior(), asyncio.gather(*(into(p) for p in live if len(ids) >= 2)))
     ev_ids = [ev for ev, _, _ in results if ev]
     out["moves"] = [m for _, _, ms in results for m in ms]
     out["moves_total"] = sum(n for _, n, _ in results)
@@ -205,9 +209,10 @@ async def _geo(live: list[Peer], companies: dict[int, dict[str, Any]], out: dict
             for label, _cnt in sorted((hc.get("by_region_absolute") or {}).items(), key=lambda kv: -kv[1]):
                 if not _is_country_or_state(label):
                     hq = await look(label, hints[p.id])
-                    if hq:
+                    if hq and hq.get("source") != "country-fallback":
                         hq = {**hq, "label": hq["label"] + " (largest office)"}
                         break
+                    hq = None
         if hq:
             p.hq.lat, p.hq.lng, p.hq.label = hq["lat"], hq["lng"], hq["label"]
             p.hq.city, p.hq.country = loc.get("city") or hq["label"].split(",")[0], ISO3.get(loc.get("country") or "", loc.get("country"))
@@ -229,9 +234,11 @@ async def _geo(live: list[Peer], companies: dict[int, dict[str, Any]], out: dict
         geo = out["geo"][p.id]
         geo["regions"] = _dedupe_regions(geo["regions"])
         series = ((companies[p.id].get("headcount") or {}).get("by_function_timeseries") or {}).get("GEO_REGION") or {}
+        coverage_start = min((pts[0]["date"][:10] for pts in series.values() if pts), default=None)
         for label, pts in series.items():
             pts = [x for x in pts if x.get("employee_count")]
-            if pts and pts[0]["date"][:10] >= cutoff and not _is_country_or_state(label):
+            if pts and pts[0]["date"][:10] >= cutoff and coverage_start and pts[0]["date"][:10] > coverage_start \
+                    and not _is_country_or_state(label):
                 geo["new_regions"].append({"label": label, "since": pts[0]["date"][:10], "count": pts[-1]["employee_count"]})
 
 
@@ -239,20 +246,49 @@ HOMEPAGE_TIMEOUT_S = 40  # runs alongside jobs/talent/geo, which take ~30-40s an
 
 
 async def _homepage(peers: list[Peer], live: list[Peer], client: CrustClient, tracer: Tracer, out: dict[str, Any], seed_id: int | None) -> None:
-    """Seed (or best-funded peer) homepage for the claim check; capped so it can't stall the run."""
+    """Target's own claims: homepage + about/pricing/customers/careers, plus search snippets of its site.
+    Both fetches run together and are capped so they can't stall the run."""
     target = next((p for p in peers if p.id == seed_id), None) if seed_id else None
     if not (target or peers):
         return
     tp = target or max(live, key=lambda p: (p.raised_usd or 0, p.headcount or 0), default=peers[0])
-    url = tp.website or f"https://{tp.domain}"
-    try:
-        data, ev = await asyncio.wait_for(client.web_fetch([url], label=f"web/fetch {tp.name} homepage (claims)"), HOMEPAGE_TIMEOUT_S)
-        html = (data[0].get("content") or "") if data else ""
-        out["claims_source"] = {"peer_id": tp.id, "url": url, "text": _html_to_text(html)[:20000], "ev": ev}
-    except asyncio.TimeoutError:
-        tracer.decide("degrade", "homepage fetch", f"no response in {HOMEPAGE_TIMEOUT_S}s; claims left unverifiable")
-    except CrustError as e:
-        tracer.decide("degrade", "homepage fetch", e.message)
+    base = (tp.website or f"https://{tp.domain}").rstrip("/")
+    if "://" not in base:
+        base = "https://" + base
+    urls = [base, base + "/about", base + "/pricing", base + "/customers", base + "/careers"]
+    texts: list[str] = []
+    evs: list[str] = []
+
+    async def site() -> None:
+        try:
+            data, ev = await asyncio.wait_for(
+                client.web_fetch(urls, label=f"web/fetch {tp.name} site (home, about, pricing, customers, careers)"), HOMEPAGE_TIMEOUT_S)
+            evs.insert(0, ev)
+            for row in data or []:
+                if row.get("success") and row.get("content"):
+                    texts.insert(0, f"[{row.get('url')}] " + _html_to_text(row["content"])[:12000])
+        except asyncio.TimeoutError:
+            tracer.decide("degrade", "site fetch", f"no response in {HOMEPAGE_TIMEOUT_S}s; claims rely on search snippets")
+        except CrustError as e:
+            tracer.decide("degrade", "site fetch", e.message)
+
+    async def snippets() -> None:  # rendered snippets help when the site is a JS app
+        try:
+            sq, ev2 = await client.web_search(f"{tp.name} raised funding employees customers founded headquarters hiring",
+                                              sources=["web"], label=f"web/search site:{tp.domain} rendered snippets")
+            evs.append(ev2)
+            snips = [f"{r.get('title') or ''}. {r.get('snippet') or ''}" for r in sq.get("results", [])
+                     if tp.domain and tp.domain in (r.get("url") or "")]
+            if snips:
+                texts.append("[search snippets] " + " ".join(snips)[:6000])
+        except CrustError as e:
+            tracer.decide("degrade", "site snippets", e.message)
+
+    await asyncio.gather(site(), snippets())
+    if texts:
+        out["claims_source"] = {"peer_id": tp.id, "url": base, "text": "\n".join(texts)[:40000], "ev": evs[0], "evs": evs,
+                                "pages": len(texts)}
+        tracer.emit("note", f"Collected {len(texts)} text sources from {tp.name}'s site for claim checking", ev=evs)
 
 
 def _is_country_or_state(label: str) -> bool:

@@ -52,7 +52,7 @@ class CrustClient:
         self.use_cache = settings.use_cache if use_cache is None else use_cache
         self.cache = Cache(str(settings.cache_dir / "crust"))
         self.http = httpx.AsyncClient(
-            base_url=settings.crust_base_url, timeout=httpx.Timeout(300.0, connect=15.0),
+            base_url=settings.crust_base_url, timeout=httpx.Timeout(90.0, connect=15.0),
             headers={"Authorization": f"Bearer {settings.crust_api_key}",
                      "x-api-version": settings.crust_api_version,
                      "Content-Type": "application/json"})
@@ -95,12 +95,15 @@ class CrustClient:
                 r = await self.http.request(method, path, json=body, params=params)
             except httpx.HTTPError as e:   # network / timeout
                 last_err = CrustError(0, str(e), path)
+                if isinstance(e, httpx.TimeoutException) and attempt >= 2:
+                    tr.decide("degrade", path, f"timed out twice ({type(e).__name__}); giving up on this call")
+                    break
                 tr.decide("retry", path, f"network error on attempt {attempt}: {type(e).__name__}")
                 await asyncio.sleep(2 ** attempt)
                 continue
             ms = int((time.monotonic() - t0) * 1000)
             if r.status_code == 429 or r.status_code >= 500:
-                wait = float(r.headers.get("Retry-After", 2 ** attempt))
+                wait = _retry_after(r.headers.get("Retry-After"), 2 ** attempt)
                 last_err = CrustError(r.status_code, r.text[:200], path)
                 tr.decide("retry", path, f"HTTP {r.status_code} on attempt {attempt}, backing off {wait:.0f}s")
                 await asyncio.sleep(min(wait, 30))
@@ -177,6 +180,22 @@ class CrustClient:
             return float(data["account"]["credits"])
         except Exception:
             return None
+
+
+def _retry_after(value: str | None, default: float) -> float:
+    """Retry-After may be delay-seconds or an HTTP-date (RFC 7231); never let it raise."""
+    if not value:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+        from datetime import datetime, timezone
+        return max(1.0, (parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds())
+    except Exception:
+        return default
 
 
 def _short(obj: Any, limit: int = 300) -> Any:

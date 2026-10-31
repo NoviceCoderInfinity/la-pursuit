@@ -1,6 +1,8 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
+import { getWatchStatus, type WatchStatus } from "@/lib/api";
 import { Num } from "@/components/Num";
 import { SceneFrame } from "@/components/ui";
 import { cx } from "@/lib/format";
@@ -11,9 +13,19 @@ const SCENE_NAME: Record<string, string> = { globe: "01 Atlas", field: "02 Momen
 const LENS_WORD: Record<string, string> = { operator: "operator", investor: "investor", founder: "founder" };
 
 export function DeckSceneView({ data }: { data: DeckScene }) {
-  const { lens, peer, status } = useRun();
+  const { lens, peer, status, runId } = useRun();
   const target = data.target_id ? peer(data.target_id) : undefined;
   const live = data.watches.filter((w) => w.id && w.id !== "preview");
+  const [ws, setWs] = useState<Record<string, WatchStatus>>({});
+  useEffect(() => {
+    if (!live.length) return;
+    let stop = false;
+    const tick = () => getWatchStatus(runId).then((rows) => { if (!stop) setWs(Object.fromEntries(rows.map((r) => [String(r.id), r]))); }).catch(() => {});
+    tick();
+    const t = setInterval(tick, 60_000);
+    return () => { stop = true; clearInterval(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runId, live.length]);
 
   const title = target && lens !== "founder"
     ? <>{data.moves.length} moves for the {LENS_WORD[lens]}{lens === "investor" ? ` looking at ${target.name}` : lens === "operator" ? ` at ${target.name}` : ""}.</>
@@ -88,6 +100,14 @@ export function DeckSceneView({ data }: { data: DeckScene }) {
                   <span className="font-mono text-[11px] text-muted">{isLive ? `#${w.id} · ${w.status}` : "preview"}</span>
                 </div>
                 <div className="mt-2 text-[12px] text-fg-2">{w.track}</div>
+                {(() => { const st = ws[String(w.id)]; const r0 = st?.runs?.[0]; return r0 ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                    <span className={cx("rounded-full px-2 py-0.5 font-mono", r0.status === "SUCCESS" ? "bg-[color-mix(in_srgb,var(--green)_14%,transparent)] text-green" : "bg-bg-3 text-muted")}>baseline {r0.status.toLowerCase()}</span>
+                    <Num value={`${r0.records_matched ?? 0} matched`} ev={st.ev} className="font-mono text-fg-2" />
+                    <Num value={`${r0.new_records_count ?? 0} flagged`} ev={st.ev} className="font-mono text-fg-2" />
+                    {st.last_run_at && <span className="font-mono text-muted">{st.last_run_at.slice(0, 16).replace("T", " ")} UTC</span>}
+                  </div>
+                ) : null; })()}
                 <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-muted">
                   {w.entities != null && <span>{w.resolved ?? w.entities}/{w.entities} peers resolved</span>}
                   {sample && <span>sample · {sample}</span>}
