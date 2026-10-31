@@ -235,7 +235,7 @@ async def _geo(live: list[Peer], companies: dict[int, dict[str, Any]], out: dict
                 geo["new_regions"].append({"label": label, "since": pts[0]["date"][:10], "count": pts[-1]["employee_count"]})
 
 
-HOMEPAGE_TIMEOUT_S = 20
+HOMEPAGE_TIMEOUT_S = 40  # runs alongside jobs/talent/geo, which take ~30-40s anyway
 
 
 async def _homepage(peers: list[Peer], live: list[Peer], client: CrustClient, tracer: Tracer, out: dict[str, Any], seed_id: int | None) -> None:

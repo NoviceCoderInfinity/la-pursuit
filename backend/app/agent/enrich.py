@@ -1,6 +1,7 @@
 """Stage 4: batched full enrichment of the peer set + cross-field truth checks."""
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from app.crust.client import CrustClient, CrustError
@@ -10,6 +11,8 @@ from app.models import HQ, Candidate, Dispute, Peer
 from app.trace import Tracer
 
 BATCH = 4
+GIANT = 2000          # people; these enrich slowly, so each gets its own call
+ENRICH_TIMEOUT_S = 45  # past this a company keeps search-level data (shown as a degrade in the trace)
 
 
 async def enrich_peers(cands: list[Candidate], client: CrustClient, tracer: Tracer, ledger: Ledger
@@ -20,31 +23,41 @@ async def enrich_peers(cands: list[Candidate], client: CrustClient, tracer: Trac
     ev_by_id: dict[int, str] = {}
     by_domain = {c.domain: c for c in cands if c.domain}
     domains = list(by_domain)
-    for i in range(0, len(domains), BATCH):
-        chunk = domains[i:i + BATCH]
+    async def batch(i: int, chunk: list[str]) -> list[tuple[dict[str, Any], str]]:
         try:
-            data, ev = await client.enrich(chunk, ENRICH_FIELDS, label=f"enrich batch {i // BATCH + 1}: {', '.join(chunk)}")
+            data, ev = await asyncio.wait_for(
+                client.enrich(chunk, ENRICH_FIELDS, label=f"enrich batch {i + 1}: {', '.join(chunk)}"), ENRICH_TIMEOUT_S)
+            return [(row, ev) for row in data or []]
+        except asyncio.TimeoutError:
+            tracer.decide("degrade", ", ".join(chunk), f"enrichment took over {ENRICH_TIMEOUT_S}s; keeps search-level data only")
+            return []
         except CrustError as e:
-            tracer.decide("retry", f"enrich batch {i // BATCH + 1}", f"{e.message[:120]}; splitting the batch into single-company calls")
-            data = []
-            for d in chunk:
-                try:
-                    one, ev = await client.enrich([d], ENRICH_FIELDS, label=f"enrich {d}")
-                    data += one or []
-                except CrustError as e2:
-                    tracer.decide("degrade", d, f"{e2.message[:120]}; keeps search-level data only")
-            if not data:
-                continue
-        for row in data or []:
-            ms = row.get("matches") or []
-            if not ms:
-                tracer.decide("degrade", row.get("matched_on", "?"), "no enrichment returned")
-                continue
-            cd = ms[0].get("company_data", {})
-            cid = cd.get("crustdata_company_id")
-            if cid:
-                companies[cid] = cd
-                ev_by_id[cid] = ev
+            tracer.decide("retry", f"enrich batch {i + 1}", f"{e.message[:120]}; splitting the batch into single-company calls")
+        rows: list[tuple[dict[str, Any], str]] = []
+        for d in chunk:
+            try:
+                one, ev = await client.enrich([d], ENRICH_FIELDS, label=f"enrich {d}")
+                rows += [(row, ev) for row in one or []]
+            except CrustError as e2:
+                tracer.decide("degrade", d, f"{e2.message[:120]}; keeps search-level data only")
+        return rows
+
+    # Large companies take 40-60s each to enrich; batches run together (the client's gate keeps us
+    # under the enrich RPM) so the stage costs about one slow batch, not the sum of all of them.
+    giants = [d for d in domains if (by_domain[d].headcount or 0) >= GIANT]
+    rest = [d for d in domains if d not in giants]
+    chunks = [[d] for d in giants] + [rest[i:i + BATCH] for i in range(0, len(rest), BATCH)]
+    results = await asyncio.gather(*(batch(i, c) for i, c in enumerate(chunks)))
+    for row, ev in (r for rows in results for r in rows):
+        ms = row.get("matches") or []
+        if not ms:
+            tracer.decide("degrade", row.get("matched_on", "?"), "no enrichment returned")
+            continue
+        cd = ms[0].get("company_data", {})
+        cid = cd.get("crustdata_company_id")
+        if cid:
+            companies[cid] = cd
+            ev_by_id[cid] = ev
     peers: list[Peer] = []
     disputes: list[Dispute] = []
     for c in cands:
